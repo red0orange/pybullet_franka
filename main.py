@@ -1,16 +1,18 @@
-import rospy
+import time
+import path
+import random
 from tqdm import tqdm
-from cmath import pi
 import copy
 import pickle
-import time
+import rospy
 
+import tf
 import numpy as np
-import path
 import pybullet as p
 import pybullet_planning as pp
 
 from finger_panda_robot_interface import FingerPandaRobotInterface
+from suction_panda_robot_interface import SuctionPandaRobotInterface
 from _get_heightmap import get_heightmap
 import geometry
 import utils
@@ -20,15 +22,84 @@ home = path.Path("~").expanduser()
 
 class Interface:
 
-    table_center = np.array([0.55, 0, -0.15])
-    pile_center = np.array([0.45, 0, -0.02])
-    pile_size = np.array([[-0.15, -0.25, 0.10], [0.15, 0.25, 0.35]])
+    table_center = np.array([0.75, 0, -0.20])
+    pile_center = np.array([0.35, 0, 0.32])
+    pile_size = np.array([[-0.10, -0.25, 0.0], [0.35, 0.25, 0.60]])
     table_center.setflags(write=False)
     pile_center.setflags(write=False)
 
     def __init__(self):
-        self._env = Env("franka_panda/panda_finger")
+        # self._env = Env("franka_panda/panda_finger")
+        self._env = Env("franka_panda/panda_suction")
         self._env.reset()
+
+        # 放置障碍物
+        seed = 111
+        cube_num = 15
+        fail_stop_thres = 1000
+        pile_aabb = [
+            self.pile_center + self.pile_size[0],
+            self.pile_center + self.pile_size[1],
+        ]
+        # pp.draw_aabb(pile_aabb)
+        self.build_scene(pile_aabb, fail_stop_thres, cube_num, seed=seed)
+        pass
+
+    def build_scene(self, pile_aabb, fail_stop_thres, cube_num, seed=111):
+        def create_block(pos, orientation, block_scale, block_mass=1.0):
+            block_visual_shape_id = p.createVisualShape(shapeType=p.GEOM_BOX,
+                                                        halfExtents=[block_scale]*3,
+                                                        rgbaColor=[1, 1, 0, 1])
+            block_collision_shape_id = p.createCollisionShape(shapeType=p.GEOM_BOX,
+                                                            halfExtents=[block_scale]*3)
+            block_body_id = p.createMultiBody(baseMass=block_mass, baseVisualShapeIndex=block_visual_shape_id,
+                                            baseCollisionShapeIndex=block_collision_shape_id,
+                                            basePosition=pos, baseOrientation=orientation)
+
+            return block_body_id
+
+        # 放桌子
+        with pp.LockRenderer():
+            self.table_id = pp.load_pybullet("table/table.obj", scale=1.0)   # table_id: 2
+            quat = tf.transformations.quaternion_from_euler(0, 0, np.pi/2)
+            pp.set_pose(self.table_id, ([self.table_center[0] - 0.1, self.table_center[1], self.table_center[2]], quat))
+
+        block_scale = 0.06
+        col_num = 5
+        row_num = 4
+        height_num = 4
+
+        random.seed(seed)
+        cube_matrix = np.random.randint(1, height_num, size=(row_num, col_num))
+        self.cube_centers = np.zeros((row_num, col_num, 3))
+
+        object_ids = [self.table_id]
+        start_pos = pile_aabb[0] + [0, 0, 0]
+        for i in range(row_num):
+            for j in range(col_num):
+                self.cube_centers[i, j] = [start_pos[0] + i*block_scale*2, start_pos[1] + j*block_scale*2, start_pos[2] + (cube_matrix[i, j])*(block_scale*2) + 0.02]
+                for k in range(cube_matrix[i, j]):
+                    pos = [start_pos[0] + i*block_scale*2, start_pos[1] + j*block_scale*2, start_pos[2] + k*(block_scale*2)]
+                    obj_id = create_block(pos, [0, 0, 0, 1], block_scale)
+                    object_ids.append(obj_id)
+        self.object_ids = object_ids
+
+        for _ in range(int(1 / pp.get_time_step())):
+            p.stepSimulation()
+            if self._env._gui:
+                time.sleep(pp.get_time_step())
+
+        return object_ids
+
+    def set_env(self):
+        range_x = (-0.5, 0.5)
+        range_y = (-0.5, 0.5)
+        range_z = (0, 0) # 将方块放置在平面上
+        num_blocks = 3
+
+        for i in range(num_blocks):
+            pos = random_position(range_x, range_y, range_z)
+            block_id = create_block(pos)
         pass
 
     def movejs(self, js, sleep_time=1/240, *argc, **argv):
@@ -38,113 +109,32 @@ class Interface:
                 time.sleep(sleep_time)
         pass
 
-    def scan(self):
-        ############################# 生成扫描路径
-        all_scan_eyes = []
-        all_scan_targets = []
-
-        def sample_ellipse(center_x, center_y, a, b, num_points):
-            t = np.linspace(0, 2*np.pi, num_points)
-            x = center_x + a*np.cos(t)
-            y = center_y + b*np.sin(t)
-            return x, y
-
-        # cycle 1
-        scan_eye_height = 0.4
-        scan_target_height = 0.2
-        scan_ell_a_scale_fator = 1.6
-        scan_ell_b_scale_fator = 1.2
-        scan_target_size_factor = 1 / 4
-        scan_num_points = 50
-
-        pile_center = self.pile_center
-        pile_size = self.pile_size[:, :2]
-        pile_width = pile_size[1, 0] - pile_size[0, 0]
-        pile_height = pile_size[1, 1] - pile_size[0, 1]
-
-        scan_ell_a = (pile_width / 2) * scan_ell_a_scale_fator
-        scan_ell_b = (pile_height / 2) * scan_ell_b_scale_fator
-
-        scan_ell_dx, scan_ell_dy = sample_ellipse(0, 0, scan_ell_a, scan_ell_b, scan_num_points)
-        scan_eyes = np.concatenate([(scan_ell_dx + pile_center[0])[None, ...], (scan_ell_dy + pile_center[1])[None, ...], np.full_like(scan_ell_dx, scan_eye_height)[None, ...]], axis=0).T
-        scan_targets = np.concatenate([(scan_ell_dx * scan_target_size_factor + pile_center[0])[None, ...], (scan_ell_dy * scan_target_size_factor + pile_center[1])[None, ...], np.full_like(scan_ell_dx, scan_target_height)[None, ...]], axis=0).T
-        all_scan_eyes.append(scan_eyes)
-        all_scan_targets.append(scan_targets)
-
-        # # cycle 2
-        scan_eye_height = 0.5
-        scan_target_height = 0.1
-        scan_ell_a_scale_fator = 1.6
-        scan_ell_b_scale_fator = 1.2
-        scan_target_size_factor = 1 / 4
-        scan_num_points = 30
-
-        pile_center = self.pile_center
-        pile_size = self.pile_size[:, :2]
-        pile_width = pile_size[1, 0] - pile_size[0, 0]
-        pile_height = pile_size[1, 1] - pile_size[0, 1]
-
-        scan_ell_a = (pile_width / 2) * scan_ell_a_scale_fator
-        scan_ell_b = (pile_height / 2) * scan_ell_b_scale_fator
-
-        scan_ell_dx, scan_ell_dy = sample_ellipse(0, 0, scan_ell_a, scan_ell_b, scan_num_points)
-        scan_eyes = np.concatenate([(scan_ell_dx + pile_center[0])[None, ...], (scan_ell_dy + pile_center[1])[None, ...], np.full_like(scan_ell_dx, scan_eye_height)[None, ...]], axis=0).T
-        scan_targets = np.concatenate([(scan_ell_dx * scan_target_size_factor + pile_center[0])[None, ...], (scan_ell_dy * scan_target_size_factor + pile_center[1])[None, ...], np.full_like(scan_ell_dx, scan_target_height)[None, ...]], axis=0).T
-        all_scan_eyes.append(scan_eyes)
-        all_scan_targets.append(scan_targets)
-
-        all_scan_eyes = np.concatenate(all_scan_eyes, axis=0)
-        all_scan_targets = np.concatenate(all_scan_targets, axis=0)
-
-        # for i in range(len(scan_eyes)):
-        #     eye = scan_eyes[i]
-        #     target = scan_targets[i]
-        #     pp.draw_pose([[eye[0], eye[1], eye[2]], [0, 0, 0, 1]], 0.1)
-        #     pp.draw_pose([[target[0], target[1], target[2]], [0, 0, 0, 1]], 0.1)
-
-        # @note TODO 保存好的扫描路径，可以直接读取
-        js = []
-        flip_flags = []
-        for i in range(len(all_scan_eyes)):
-            eye = all_scan_eyes[i]
-            target = all_scan_targets[i]
-
-            # up = None
-            if eye[0] > pile_center[0]:
-                up = pile_center[0], pile_center[1], target[2]+0.50 # 始终朝中心
-            else:
-                up = pile_center[0], pile_center[1], target[2]-0.50 # 始终朝中心
-            up = up - eye
-
+    def pick(self):
+        all_test_poses = []
+        for cube_center in np.reshape(self.cube_centers, (-1, 3)):
+            eye = cube_center
+            target = cube_center + [0, 0, -0.1]
             c = geometry.Coordinate.from_matrix(
-                geometry.look_at(eye, target, up)
+                geometry.look_at(eye, target, None)
             )
+            all_test_poses.append(c.pose)
 
+        all_test_js = []
+        for pose in all_test_poses:
+            pp.draw_pose(pose, length=0.1, width=0.01)
             j = self._env.pi.solve_ik(
-                c.pose,
-                move_target=self._env.pi.robot_model.camera_link,
+                pose,
+                move_target=self._env.pi.robot_model.tipLink,
                 n_init=10,
                 thre=0.05,
                 rthre=np.deg2rad(5),
-                obstacles=[2, 3, 4, 5],
+                obstacles=self.object_ids,
                 validate=True,
             )
-            if j is None:
-                rospy.logerr("j is not found")
-                continue
+            all_test_js.append(j)
 
-            js.append(j)
-            flip_flags.append(eye[0] > pile_center[0])
-            self._env.pi.setj(j)
-
-            pp.draw_pose([c.position, c.quaternion], 0.1)
-
-        ############################# 运行扫描的路径
-        self.movejs([[0.010523236721068734, -1.4790833239639014, 0.10027132190633238, -2.416246868493765, 0.08994288870361117, 1.4022499498261343, 0.8516519819506339]])
-        time.sleep(1)
-
-        # 开始移动
-        for i, j in tqdm(enumerate(js), desc="Scan Scene"):
+        for i, j in tqdm(enumerate(all_test_js), desc="Scan Scene"):
+            if j is None: continue
             for _ in self._env.pi.movej(j):
                 pp.step_simulation()
                 time.sleep(1 / 240)
@@ -198,17 +188,23 @@ class Env:
             pp.set_pose(self.plane, ([0, 0, self.TABLE_OFFSET], [0, 0, 0, 1]))
 
         # @note load Panda
-        self.pi = FingerPandaRobotInterface(
-            max_force=None,
-            surface_threshold=np.inf,
-            surface_alignment=False,
+        # self.pi = FingerPandaRobotInterface(
+        #     max_force=None,
+        #     surface_threshold=np.inf,
+        #     surface_alignment=False,
+        #     planner="RRTConnect",
+        #     robot_model=self._robot_model,
+        # )
+        self.pi = SuctionPandaRobotInterface(
+            suction_max_force=None,
+            suction_surface_threshold=np.inf,
+            suction_surface_alignment=False,
             planner="RRTConnect",
             robot_model=self._robot_model,
         )
 
         c = geometry.Coordinate()
-        c.translate([0.05, 0, 0.05])
-        c.rotate([0, 0, np.pi / 2])
+        c.translate([0.00, -0.1, -0.1])
         pose = c.pose
         self.pi.add_camera(
             pose=pose,
@@ -273,7 +269,11 @@ def main():
     import IPython
 
     interface = Interface()
-    interface.scan()
+    interface.pick()
+
+    while True:
+        p.stepSimulation()
+        time.sleep(0.05)
 
     IPython.embed()
 

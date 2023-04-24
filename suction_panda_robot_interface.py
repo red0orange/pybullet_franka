@@ -11,7 +11,7 @@ import geometry
 import utils
 import pybullet_utils
 from ompl_planning import PbPlanner
-from finger_gripper import FingerGripper
+from suction_gripper import SuctionGripper
 
 import skrobot
 
@@ -19,15 +19,15 @@ import skrobot
 here = path.Path(__file__).abspath().parent
 
 
-class FingerPandaRobotInterface:
+class SuctionPandaRobotInterface:
     def __init__(
         self,
         pose=None,
-        max_force=10,
-        surface_threshold=np.deg2rad(10),
-        surface_alignment=True,
+        suction_max_force=10,
+        suction_surface_threshold=np.deg2rad(10),
+        suction_surface_alignment=True,
         planner="RRTConnect",
-        robot_model="franka_panda/panda_finger",
+        robot_model="franka_panda/panda_suction",
     ):
         self.pose = pose
 
@@ -39,21 +39,14 @@ class FingerPandaRobotInterface:
         self.robot = pybullet_planning.load_pybullet(
             urdf_file, fixed_base=True
         )
-        self.ee_link_name = "panda_hand"
-        self.ee = pybullet_planning.link_from_name(
-            self.robot, self.ee_link_name)
-        self.left_finger = pybullet_planning.link_from_name(
-            self.robot, "panda_finger_link1")
-        self.right_finger = pybullet_planning.link_from_name(
-            self.robot, "panda_finger_link2")
+        self.ee = pybullet_planning.link_from_name(self.robot, "tipLink")
 
-        self.gripper = FingerGripper(
+        self.gripper = SuctionGripper(
             self.robot,
-            self.left_finger,
-            self.right_finger,
-            max_force=max_force,
-            surface_threshold=surface_threshold,
-            surface_alignment=surface_alignment,
+            self.ee,
+            max_force=suction_max_force,
+            surface_threshold=suction_surface_threshold,
+            surface_alignment=suction_surface_alignment,
         )
 
         self.attachments = []
@@ -74,10 +67,6 @@ class FingerPandaRobotInterface:
         self.homej = [0, -np.pi / 4, 0, -np.pi / 2, 0, np.pi / 4, np.pi / 4]
         for joint, joint_angle in zip(self.joints, self.homej):
             p.resetJointState(self.robot, joint, joint_angle)
-        p.resetJointState(self.robot, self.left_finger, 0.04)
-        p.resetJointState(self.robot, self.right_finger, 0.04)
-        # p.resetJointState(self.robot, self.left_finger, 0.0)
-        # p.resetJointState(self.robot, self.right_finger, 0.0)
         self.update_robot_model()
 
         self.planner = planner
@@ -119,16 +108,10 @@ class FingerPandaRobotInterface:
             getattr(self.robot_model, joint_name).joint_angle(joint_angle)
 
     def setj(self, joint_positions):
-        # set arm joints
         for joint, joint_position in zip(self.joints, joint_positions):
             p.resetJointState(self.robot, joint, joint_position)
         for attachment in self.attachments:
             attachment.assign()
-
-    def set_finger(self, finger_positions):
-        p.resetJointState(self.robot, self.left_finger, finger_positions[0])
-        p.resetJointState(self.robot, self.right_finger, finger_positions[1])
-        pass
 
     def getj(self):
         joint_positions = []
@@ -177,7 +160,7 @@ class FingerPandaRobotInterface:
         **kwargs,
     ):
         if move_target is None:
-            move_target = self.robot_model.panda_hand
+            move_target = self.robot_model.tipLink
         if random_state is None:
             random_state = np.random.RandomState()
 
@@ -188,7 +171,6 @@ class FingerPandaRobotInterface:
             return lower + scale * extents
 
         self.update_robot_model()
-        # self.update_robot_model(sample_fn())
         c = geometry.Coordinate(*pose)
         for _ in range(n_init):
             result = self.robot_model.inverse_kinematics(
@@ -213,6 +195,37 @@ class FingerPandaRobotInterface:
             j.append(getattr(self.robot_model, joint_name).joint_angle())
         return j
 
+    # def _solve_ik_pybullet(self, pose):
+    #     n_joints = p.getNumJoints(self.robot)
+    #     lower_limits = []
+    #     upper_limits = []
+    #     for i in range(n_joints):
+    #         joint_info = p.getJointInfo(self.robot, i)
+    #         lower_limits.append(joint_info[8])
+    #         upper_limits.append(joint_info[9])
+    #     joint_positions = p.calculateInverseKinematics(
+    #         bodyUniqueId=self.robot,
+    #         endEffectorLinkIndex=self.ee,
+    #         targetPosition=pose[0],
+    #         targetOrientation=pose[1],
+    #         lowerLimits=lower_limits,
+    #         upperLimits=upper_limits,
+    #         restPoses=self.homej,
+    #         maxNumIterations=1000,
+    #         residualThreshold=1e-5,
+    #     )
+    #     return joint_positions
+    #
+    # def _solve_ik_pybullet_planning(self, pose):
+    #     with pybullet_planning.LockRenderer():
+    #         with pybullet_planning.WorldSaver():
+    #             joint_positions = pybullet_planning.inverse_kinematics(
+    #                 self.robot,
+    #                 self.ee,
+    #                 pose,
+    #             )
+    #     return joint_positions
+
     @contextlib.contextmanager
     def enabling_attachments(self):
         robot_model = self.robot_model
@@ -232,14 +245,14 @@ class FingerPandaRobotInterface:
         for i, attachment in enumerate(attachments):
             position, quaternion = attachment.grasp_pose
             link = skrobot.model.Link(
-                parent=self.robot_model.panda_hand,
+                parent=self.robot_model.tipLink,
                 pos=position,
                 rot=geometry.quaternion_matrix(quaternion)[:3, :3],
                 name=f"attachment_link{i}",
             )
             joint = skrobot.model.FixedJoint(
                 child_link=link,
-                parent_link=self.robot_model.panda_hand,
+                parent_link=self.robot_model.tipLink,
                 name=f"attachment_joint{i}",
             )
             link.joint = joint
@@ -260,7 +273,7 @@ class FingerPandaRobotInterface:
         )
         return planner.validityChecker.isValid(j)
 
-    def ompl_planj(
+    def planj(
         self,
         j,
         obstacles=None,
@@ -291,7 +304,6 @@ class FingerPandaRobotInterface:
             logger.warning("Goal state is invalid")
             return
 
-        # @note 使用 OMPL 求解
         result = planner.plan(self.getj(), j)
 
         if result is None:
@@ -314,9 +326,30 @@ class FingerPandaRobotInterface:
 
         return path
 
-    def grasp(self):
+    def grasp(self, min_dz=None, max_dz=None, rotation_axis="z", speed=0.01):
+        c = geometry.Coordinate(
+            *pybullet_planning.get_link_pose(self.robot, self.ee)
+        )
+        dz_done = 0
+        while True:
+            c.translate([0, 0, 0.001])
+            dz_done += 0.001
+            j = self.solve_ik(c.pose, rotation_axis=rotation_axis)
+            if j is None:
+                raise RuntimeError("IK failed")
+            for i in self.movej(j, speed=speed):
+                yield i
+                if min_dz is not None and dz_done < min_dz:
+                    continue
+                if self.gripper.detect_contact():
+                    break
+            if min_dz is not None and dz_done < min_dz:
+                continue
+            if self.gripper.detect_contact():
+                break
+            if max_dz is not None and dz_done >= max_dz:
+                break
         self.gripper.activate()
-        pass
 
     def ungrasp(self):
         self.gripper.release()
@@ -324,7 +357,6 @@ class FingerPandaRobotInterface:
         #     p.removeBody(self.virtual_grasped_object)
         #     del self.virtual_grasped_object
         self.attachments = []
-        pass
 
     def add_link(self, name, pose, parent=None):
         if parent is None:
@@ -417,6 +449,176 @@ class FingerPandaRobotInterface:
             width=self.camera["width"],
         )
 
+    def random_grasp(
+        self,
+        depth,
+        segm,
+        mask,
+        bg_object_ids,
+        object_ids,
+        max_angle=np.deg2rad(45),
+        num_trial=10,
+        random_state=None,
+        noise=True,
+    ):
+        if random_state is None:
+            random_state = np.random.RandomState()
+
+        # This should be called after moving camera to observe the scene.
+        K = self.get_opengl_intrinsic_matrix()
+
+        if mask.sum() == 0:
+            logger.warning("mask is empty")
+            return
+
+        pcd_in_camera = geometry.pointcloud_from_depth(
+            depth, fx=K[0, 0], fy=K[1, 1], cx=K[0, 2], cy=K[1, 2]
+        )
+
+        camera_to_world = self.get_pose("camera_link")
+        ee_to_world = self.get_pose("tipLink")
+        camera_to_ee = pybullet_planning.multiply(
+            pybullet_planning.invert(ee_to_world), camera_to_world
+        )
+        pcd_in_ee = geometry.transform_points(
+            pcd_in_camera,
+            geometry.transformation_matrix(*camera_to_ee),
+        )
+
+        normals = geometry.normals_from_pointcloud(pcd_in_ee)
+
+        segm = segm.reshape(-1)
+        mask = mask.reshape(-1)
+        pcd_in_ee = pcd_in_ee.reshape(-1, 3)
+        normals = normals.reshape(-1, 3)
+
+        indices = np.where(mask)[0]
+        random_state.shuffle(indices)
+
+        j_init = self.getj()
+
+        path1 = path2 = None
+        for index in indices[:num_trial]:
+            object_id = segm[index]
+            position = pcd_in_ee[index]
+            quaternion = geometry.quaternion_from_vec2vec(
+                [0, 0, 1], normals[index]
+            )
+            T_ee_to_ee_af_in_ee = geometry.transformation_matrix(
+                position, quaternion
+            )
+
+            T_ee_to_world = geometry.transformation_matrix(
+                *pybullet_utils.get_pose(self.robot, self.ee)
+            )
+            T_ee_to_ee = np.eye(4)
+            T_ee_af_to_ee = T_ee_to_ee_af_in_ee @ T_ee_to_ee
+            T_ee_af_to_world = T_ee_to_world @ T_ee_af_to_ee
+
+            c = geometry.Coordinate(
+                *geometry.pose_from_matrix(T_ee_af_to_world)
+            )
+            c.translate([0, 0, -0.1])
+
+            vec = geometry.transform_points([[0, 0, 0], [0, 0, 1]], c.matrix)
+            if 0:
+                pybullet_planning.add_line(vec[0], vec[1], width=3)
+            v0 = [0, 0, -1]
+            v1 = vec[1] - vec[0]
+            v1 /= np.linalg.norm(v1)
+            angle = geometry.angle_between_vectors(v0, v1)
+            if angle > max_angle:
+                # logger.warning(f"angle > {np.rad2deg(max_angle)} deg")
+                continue
+
+            j = self.solve_ik(
+                c.pose, rotation_axis="z", random_state=random_state
+            )
+            if j is None:
+                # logger.warning("j is None")
+                continue
+
+            path1 = self.planj(j, obstacles=bg_object_ids + object_ids)
+            if path1 is None:
+                # logger.warning("path1 is None")
+                continue
+
+            self.setj(j)
+
+            c.translate([0, 0, 0.1])
+            j = self.solve_ik(
+                c.pose, n_init=1, rotation_axis="z", random_state=random_state
+            )
+            if j is None:
+                # logger.warning("j is None")
+                self.setj(j_init)
+                continue
+
+            obstacles = bg_object_ids + object_ids
+            obstacles.remove(object_id)
+            path2 = self.planj(j, obstacles=obstacles)
+            if path2 is None:
+                # logger.warning("path2 is None")
+                self.setj(j_init)
+                continue
+
+            self.setj(j_init)
+            break
+        if path1 is None or path2 is None:
+            return
+        for _ in (_ for j in path1 for _ in self.movej(j)):
+            yield
+
+        # XXX: getting ground truth object pose
+        obj_to_world = pybullet_planning.get_pose(object_id)
+        if noise:
+            pos, qua = obj_to_world
+            pos += random_state.normal(0, [0.003, 0.003, 0.003], 3)
+            qua += random_state.normal(0, 0.01, 4)
+            obj_to_world = pos, qua
+
+        for _ in self.grasp(min_dz=0.08, max_dz=0.12, speed=0.005):
+            yield
+
+        obstacles = bg_object_ids + object_ids
+        if self.gripper.check_grasp():
+            obstacles.remove(object_id)
+            ee_to_world = self.get_pose("tipLink")
+            obj_to_ee = pybullet_planning.multiply(
+                pybullet_planning.invert(ee_to_world), obj_to_world
+            )
+            self.attachments = [
+                pybullet_planning.Attachment(
+                    self.robot, self.ee, obj_to_ee, object_id
+                )
+            ]
+
+            # self.virtual_grasped_object = pybullet_utils.duplicate(
+            #     object_id,
+            #     mass=1e-12,
+            #     position=obj_to_world[0],
+            #     quaternion=obj_to_world[1],
+            #     rgba_color=(0, 1, 0, 0.5),
+            #     texture=False,
+            # )
+            # p.setCollisionFilterGroupMask(
+            #     self.virtual_grasped_object, -1, 0, 0
+            # )
+            # p.createConstraint(
+            #     parentBodyUniqueId=self.robot,
+            #     parentLinkIndex=self.ee,
+            #     childBodyUniqueId=self.virtual_grasped_object,
+            #     childLinkIndex=-1,
+            #     jointType=p.JOINT_FIXED,
+            #     jointAxis=(0, 0, 0),
+            #     parentFramePosition=obj_to_ee[0],
+            #     parentFrameOrientation=obj_to_ee[1],
+            #     childFramePosition=(0, 0, 0),
+            #     childFrameOrientation=(0, 0, 0, 1),
+            # )
+        else:
+            self.attachments = []
+
     def move_to_homej(self, bg_object_ids, object_ids, speed=0.01, timeout=5):
         obstacles = bg_object_ids + object_ids
         if self.attachments and self.attachments[0].child in obstacles:
@@ -446,7 +648,7 @@ class FingerPandaRobotInterface:
         if not (j is None) ^ (pose is None):
             raise ValueError("Either j or coords must be given")
 
-        p_start = self.get_pose(self.ee_link_name)
+        p_start = self.get_pose("tipLink")
 
         with pybullet_planning.WorldSaver():
             if j is None:
@@ -458,7 +660,7 @@ class FingerPandaRobotInterface:
             j_end = j
 
             self.setj(j_end)
-            p_end = self.get_pose(self.ee_link_name)
+            p_end = self.get_pose("tipLink")
 
             js_reverse = [j_end]
             for pose in pybullet_planning.interpolate_poses(p_end, p_start):
