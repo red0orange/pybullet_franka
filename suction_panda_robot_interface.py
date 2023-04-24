@@ -11,6 +11,7 @@ import geometry
 import utils
 import pybullet_utils
 from ompl_planning import PbPlanner
+from my_planning import MyPbPlanner
 from suction_gripper import SuctionGripper
 
 import skrobot
@@ -273,7 +274,53 @@ class SuctionPandaRobotInterface:
         )
         return planner.validityChecker.isValid(j)
 
-    def planj(
+    def planj(self, *args, **kwargs):
+        # return self.ori_planj(*args, **kwargs)
+        return self.my_planj(*args, **kwargs)
+
+    def my_planj(
+        self,
+        j,
+        obstacles=None,
+        min_distances=None,
+        min_distances_start_goal=None,
+        planner_range=0,
+    ):
+        step_len = 2.5
+        iter_num = 3000
+        planner = MyPbPlanner(self, obstacles, step_len, iter_num)
+
+        if not planner.isValid(self.getj(), self.getj()):
+            logger.warning("Start state is invalid")
+            return
+
+        if not planner.isValid(self.getj(), j):
+            logger.warning("Goal state is invalid")
+            return
+
+        result = planner.plan(self.getj(), j)
+
+        if result is None:
+            logger.warning("No solution found")
+            return
+
+        # ndof = len(self.joints)
+        # state_count = result.getStateCount()
+        # path = np.zeros((state_count, ndof), dtype=float)
+        # for i_state in range(state_count):
+        #     state = result.getState(i_state)
+        #     path_i = np.zeros((ndof,), dtype=float)
+        #     for i_dof in range(ndof):
+        #         path_i[i_dof] = state[i_dof]
+        #     path[i_state] = path_i
+
+        # if not np.allclose(j, path[-1]):
+        #     # the goal is not reached
+        #     return
+
+        return result
+
+    def ori_planj(
         self,
         j,
         obstacles=None,

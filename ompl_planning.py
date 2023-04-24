@@ -255,6 +255,7 @@ class PbPlanner:
         optimizingPlanner.setProblemDefinition(pdef)
         optimizingPlanner.setRange(self.planner_range)
         optimizingPlanner.setup()
+        print(optimizingPlanner.getRange())
         solved = optimizingPlanner.solve(solveTime=1)
 
         if solved:

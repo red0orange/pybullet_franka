@@ -214,7 +214,7 @@ class MyPbPlanner:
             np.random.random(self.ndof) * (self.upper - self.lower)
             + self.lower
         )
-        if self.isValid(q):
+        if self.isValid(q, q):
             return q
         else:
             return self.sample_state()
@@ -224,7 +224,7 @@ class MyPbPlanner:
         self.goal = goal_j
 
         planner = RRTConnect(start_j, goal_j, self.step_len, self.iter_num, self.sample_state, self.isValid)
-        pass
+        return planner.planning()
 
 
 class Node:
@@ -242,13 +242,19 @@ class RRTConnect:
         self.V1 = [self.s_start]
         self.V2 = [self.s_goal]
 
-        self.is_collision = collision_func
-        self.generate_random_node = sample_func
+        self._is_collision = collision_func
+        self._generate_random_node = sample_func
         pass
+
+    def generate_random_node(self):
+        return Node(self._generate_random_node())
+
+    def is_collision(self, node_a, node_b):
+        return not self._is_collision(node_a.coord, node_b.coord)
 
     def planning(self):
         for i in range(self.iter_max):
-            node_rand = self.generate_random_node(self.s_goal, self.goal_sample_rate)
+            node_rand = self.generate_random_node()
             node_near = self.nearest_neighbor(self.V1, node_rand)
             node_new = self.new_state(node_near, node_rand)
 

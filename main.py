@@ -65,9 +65,12 @@ class Interface:
             pp.set_pose(self.table_id, ([self.table_center[0] - 0.1, self.table_center[1], self.table_center[2]], quat))
 
         block_scale = 0.06
-        col_num = 5
-        row_num = 4
-        height_num = 4
+        # col_num = 5
+        # row_num = 4
+        # height_num = 4
+        col_num = 2
+        row_num = 2
+        height_num = 3
 
         random.seed(seed)
         cube_matrix = np.random.randint(1, height_num, size=(row_num, col_num))
