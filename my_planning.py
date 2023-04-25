@@ -1,4 +1,5 @@
 import itertools
+from functools import partial
 
 import numpy as np
 from ompl import base as ob
@@ -6,6 +7,23 @@ from ompl import geometric as og
 from ompl import util as ou
 import pybullet as p
 import pybullet_planning as pp
+
+
+class pbValidityChecker(ob.StateValidityChecker):
+    def __init__(self, si, is_valid_func, sample_state_func):
+        super().__init__(si)
+        self._isValid = is_valid_func
+        self._sample_state = sample_state_func
+
+        self.start = None
+        self.goal = None
+        pass
+
+    def isValid(self, state):
+        return self._isValid(end_state=state)
+
+    def sample_state(self, *args, **kwargs):
+        return self._sample_state(*args, **kwargs)
 
 
 class MyPbPlanner:
@@ -24,6 +42,18 @@ class MyPbPlanner:
 
         self.start = None
         self.goal = None
+
+        # for path simplifier
+        bounds = ob.RealVectorBounds(self.ndof)
+        for i in range(self.ndof):
+            bounds.setLow(i, self.lower[i])
+            bounds.setHigh(i, self.upper[i])
+        self.space = ob.RealVectorStateSpace(self.ndof)
+        self.space.setBounds(bounds)
+        self.si = ob.SpaceInformation(self.space)
+        self.validityChecker = pbValidityChecker(self.si, partial(self.isValid, start_state=None), self.sample_state)
+        self.si.setStateValidityChecker(self.validityChecker)
+        self.si.setup()
         pass
 
     def isValid(self, start_state, end_state, *args, **kwargs):
@@ -224,7 +254,31 @@ class MyPbPlanner:
         self.goal = goal_j
 
         planner = RRTConnect(start_j, goal_j, self.step_len, self.iter_num, self.sample_state, self.isValid)
-        return planner.planning()
+        path = planner.planning()
+
+        og_path = og.PathGeometric(self.si)
+        for q in path:
+            state = self.si.allocState()
+            state[0] = q[0]
+            state[1] = q[1]
+            state[2] = q[2]
+            state[3] = q[3]
+            state[4] = q[4]
+            state[5] = q[5]
+            state[6] = q[6]
+            og_path.append(state)
+        simplifier = og.PathSimplifier(self.si)
+        simplifier.simplifyMax(og_path)
+
+        state_count = og_path.getStateCount()
+        path = np.zeros((state_count, self.ndof), dtype=float)
+        for i_state in range(state_count):
+            state = og_path.getState(i_state)
+            path_i = np.zeros((self.ndof), dtype=float)
+            for i_dof in range(self.ndof):
+                path_i[i_dof] = state[i_dof]
+            path[i_state] = path_i
+        return path
 
 
 class Node:
