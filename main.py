@@ -137,12 +137,12 @@ class Interface:
             all_test_js[i, j] = joint
 
         for i, j in np.ndindex(self.cube_centers.shape[:2]):
-            # home
-            home_js = self._env.pi.planj(self._env.pi.homej, obstacles=self.object_ids)
-            if home_js is None:
-                print("home_js is None")
-                continue
-            self.movejs(home_js, time_scale=5, retry=True)
+            # # home
+            # home_js = self._env.pi.planj(self._env.pi.homej, obstacles=self.object_ids)
+            # if home_js is None:
+            #     print("home_js is None")
+            #     continue
+            # self.movejs(home_js, time_scale=5, retry=True)
 
             # target
             target_j = all_test_js[i, j]

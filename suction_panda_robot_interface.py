@@ -286,8 +286,8 @@ class SuctionPandaRobotInterface:
         min_distances_start_goal=None,
         planner_range=0,
     ):
-        step_len = 2.5
-        iter_num = 3000
+        step_len = 0.1
+        iter_num = 100000
         planner = MyPbPlanner(self, obstacles, step_len, iter_num)
 
         if not planner.isValid(self.getj(), self.getj()):

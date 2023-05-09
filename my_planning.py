@@ -253,31 +253,32 @@ class MyPbPlanner:
         self.start = start_j
         self.goal = goal_j
 
-        planner = RRTConnect(start_j, goal_j, self.step_len, self.iter_num, self.sample_state, self.isValid)
+        # planner = RRTConnect(start_j, goal_j, self.step_len, self.iter_num, self.sample_state, self.isValid)
+        planner = IntegratedRRT(start_j, goal_j, self.step_len, self.iter_num, self.sample_state, self.isValid)
         path = planner.planning()
 
-        og_path = og.PathGeometric(self.si)
-        for q in path:
-            state = self.si.allocState()
-            state[0] = q[0]
-            state[1] = q[1]
-            state[2] = q[2]
-            state[3] = q[3]
-            state[4] = q[4]
-            state[5] = q[5]
-            state[6] = q[6]
-            og_path.append(state)
-        simplifier = og.PathSimplifier(self.si)
-        simplifier.simplifyMax(og_path)
+        # og_path = og.PathGeometric(self.si)
+        # for q in path:
+        #     state = self.si.allocState()
+        #     state[0] = q[0]
+        #     state[1] = q[1]
+        #     state[2] = q[2]
+        #     state[3] = q[3]
+        #     state[4] = q[4]
+        #     state[5] = q[5]
+        #     state[6] = q[6]
+        #     og_path.append(state)
+        # simplifier = og.PathSimplifier(self.si)
+        # simplifier.simplifyMax(og_path)
 
-        state_count = og_path.getStateCount()
-        path = np.zeros((state_count, self.ndof), dtype=float)
-        for i_state in range(state_count):
-            state = og_path.getState(i_state)
-            path_i = np.zeros((self.ndof), dtype=float)
-            for i_dof in range(self.ndof):
-                path_i[i_dof] = state[i_dof]
-            path[i_state] = path_i
+        # state_count = og_path.getStateCount()
+        # path = np.zeros((state_count, self.ndof), dtype=float)
+        # for i_state in range(state_count):
+        #     state = og_path.getState(i_state)
+        #     path_i = np.zeros((self.ndof), dtype=float)
+        #     for i_dof in range(self.ndof):
+        #         path_i[i_dof] = state[i_dof]
+        #     path[i_state] = path_i
         return path
 
 
@@ -298,9 +299,12 @@ class RRTConnect:
 
         self._is_collision = collision_func
         self._generate_random_node = sample_func
+        self.i = 0
         pass
 
     def generate_random_node(self):
+        self.i += 1
+        print(self.i)
         return Node(self._generate_random_node())
 
     def is_collision(self, node_a, node_b):
@@ -382,7 +386,75 @@ class RRTConnect:
         return False
 
         
-class MGRRTConnect(RRTConnect):
-    def __init__(self, s_start, s_goal, step_len, goal_sample_rate, iter_max, dim):
-        super().__init__(s_start, s_goal, step_len, goal_sample_rate, iter_max, dim)
+class IntegratedRRT:
+    def __init__(self, s_start, s_goal, step_len, iter_max, sample_func, collision_func):
+        self.s_start = Node(s_start)
+        self.s_goal = Node(s_goal)
+        self.step_len = step_len
+        self.iter_max = iter_max
+        self.T = [self.s_start]
+
+        self._is_collision = collision_func
+        self._generate_random_node = sample_func
+        self.i = 0
         pass
+
+    def generate_random_node(self):
+        self.i += 1
+        print(self.i)
+        return Node(self._generate_random_node())
+
+    def is_collision(self, node_a, node_b):
+        return not self._is_collision(node_a.coord, node_b.coord)
+
+    def planning(self):
+        for i in range(self.iter_max):
+            node_rand = self.generate_random_node()
+            node_near = self.nearest_neighbor(self.T, node_rand)
+            node_new = self.new_state(node_near, node_rand)
+
+            if node_new and not self.is_collision(node_near, node_new):
+                self.T.append(node_new)
+                dist = self.node_distance(self.s_goal, node_new)
+                if dist < self.step_len:  # 小于步长，直接连接到终点
+                    node_new = self.new_state(node_new, self.s_goal)
+                    return self.extract_path(node_new)
+        return None
+    
+    def node_distance(self, n1, n2):
+        return np.linalg.norm(n1.coord - n2.coord)
+
+    def nearest_neighbor(self, node_list, n):
+        return node_list[int(np.argmin([np.linalg.norm(nd.coord - n.coord) for nd in node_list]))]
+
+    def new_state(self, node_start, node_end):
+        v = node_end.coord - node_start.coord
+        dist = np.linalg.norm(v)
+        unit_v = v / (dist+1e-8)  # @note avoid zero division
+        dist = min(self.step_len, dist)
+        new_coord = node_start.coord + dist * unit_v
+        node_new = Node(new_coord)
+        node_new.parent = node_start
+        return node_new
+
+    @staticmethod
+    def extract_path(node_new):
+        path1 = [node_new.coord]
+        node_now = node_new
+        while node_now.parent is not None:
+            node_now = node_now.parent
+            path1.append(node_now.coord)
+        return np.array(path1[::-1])
+
+    @staticmethod
+    def change_node(n1, n2):
+        new_node = Node(n2.coord)
+        new_node.parent = n1
+        return new_node
+
+    @staticmethod
+    def is_node_same(node_new_prim, node_new):
+        if ((node_new_prim.coord - node_new.coord) < 1e-4).all():
+            return True
+
+        return False
