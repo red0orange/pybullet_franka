@@ -11,7 +11,7 @@ import geometry
 import utils
 import pybullet_utils
 from ompl_planning import PbPlanner
-from my_planning import MyPbPlanner
+from my_planning import *
 from suction_gripper import SuctionGripper
 
 import skrobot
@@ -288,7 +288,8 @@ class SuctionPandaRobotInterface:
     ):
         step_len = 0.1
         iter_num = 100000
-        planner = MyPbPlanner(self, obstacles, step_len, iter_num)
+        goal_sample_rate = 0.5
+        planner = RRTConnectPlanner(self, obstacles, step_len, goal_sample_rate, iter_num)
 
         if not planner.isValid(self.getj(), self.getj()):
             logger.warning("Start state is invalid")
@@ -299,6 +300,20 @@ class SuctionPandaRobotInterface:
             return
 
         result = planner.plan(self.getj(), j)
+
+        # step_len = 0.1
+        # iter_num = 100000
+        # planner = MyPbPlanner(self, obstacles, step_len, iter_num)
+
+        # if not planner.isValid(self.getj(), self.getj()):
+        #     logger.warning("Start state is invalid")
+        #     return
+
+        # if not planner.isValid(self.getj(), j):
+        #     logger.warning("Goal state is invalid")
+        #     return
+
+        # result = planner.plan(self.getj(), j)
 
         if result is None:
             logger.warning("No solution found")

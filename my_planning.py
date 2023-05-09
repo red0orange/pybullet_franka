@@ -1,3 +1,5 @@
+import bisect
+import copy
 import itertools
 from functools import partial
 
@@ -26,24 +28,28 @@ class pbValidityChecker(ob.StateValidityChecker):
         return self._sample_state(*args, **kwargs)
 
 
-class MyPbPlanner:
-    def __init__(self, ri, obstacles, step_len, iter_num, goal_sample_rate=0.5, min_distances=None, min_distances_start_goal=None):
+class Node:
+    def __init__(self, n):
+        self.coord = np.array(n)
+        self.parent = None
+
+
+class RRTPlanner:
+    def __init__(self, ri, obstacles, iter_num, min_distances=None, min_distances_start_goal=None):
+        # 操作 Agent
         self.ri = ri
+        
+        # 参数
+        self.iter_max = iter_num
         self.ndof = len(self.ri.joints)
         self.obstacles = obstacles or []
-        self.min_distances = min_distances or {}
-        self.min_distances_start_goal = min_distances_start_goal or {}
         self.lower, self.upper = ri.get_bounds()
         self.lower = np.asarray(self.lower)
         self.upper = np.asarray(self.upper)
-        self.step_len = step_len
-        self.iter_num = iter_num
-        self.goal_sample_rate = goal_sample_rate
+        self.min_distances = min_distances or {}
+        self.min_distances_start_goal = min_distances_start_goal or {}
 
-        self.start = None
-        self.goal = None
-
-        # for path simplifier
+        # 构造 OMPL PathSimplifier 所需要的变量
         bounds = ob.RealVectorBounds(self.ndof)
         for i in range(self.ndof):
             bounds.setLow(i, self.lower[i])
@@ -56,6 +62,39 @@ class MyPbPlanner:
         self.si.setup()
         pass
 
+    ############################# Planning ############################# 
+    def sample_state(self):
+        raise BaseException("Not Implementation!")        
+
+    def plan(self):
+        raise BaseException("Not Implementation!")        
+
+    def path_simplify(self, path):
+        og_path = og.PathGeometric(self.si)
+        for q in path:
+            state = self.si.allocState()
+            state[0] = q[0]
+            state[1] = q[1]
+            state[2] = q[2]
+            state[3] = q[3]
+            state[4] = q[4]
+            state[5] = q[5]
+            state[6] = q[6]
+            og_path.append(state)
+        simplifier = og.PathSimplifier(self.si)
+        simplifier.simplifyMax(og_path)
+
+        state_count = og_path.getStateCount()
+        path = np.zeros((state_count, self.ndof), dtype=float)
+        for i_state in range(state_count):
+            state = og_path.getState(i_state)
+            path_i = np.zeros((self.ndof), dtype=float)
+            for i_dof in range(self.ndof):
+                path_i[i_dof] = state[i_dof]
+            path[i_state] = path_i
+        return path
+
+    ############################# Agent ############################# 
     def isValid(self, start_state, end_state, *args, **kwargs):
         state = end_state
         if not self.check_joint_limits(state):
@@ -233,10 +272,17 @@ class MyPbPlanner:
                 return False
         return True
 
+
+class RRTConnectPlanner(RRTPlanner):
+    def __init__(self, ri, obstacles, step_len, goal_sample_rate, iter_num, min_distances=None, min_distances_start_goal=None):
+        super().__init__(ri, obstacles, iter_num, min_distances, min_distances_start_goal)
+        self.goal_sample_rate = goal_sample_rate
+        self.step_len = step_len
+
     def sample_state(self, *args, **kwargs):
         # 一定概率直接启发式地返回目标点
         if np.random.random() < self.goal_sample_rate:
-            return self.goal
+            return copy.deepcopy(self.s_goal)
 
         # 完全随机
         # @note 改为优先在小范围内随机
@@ -245,83 +291,34 @@ class MyPbPlanner:
             + self.lower
         )
         if self.isValid(q, q):
-            return q
+            return Node(q)
         else:
             return self.sample_state()
 
     def plan(self, start_j, goal_j):
-        self.start = start_j
-        self.goal = goal_j
-
-        # planner = RRTConnect(start_j, goal_j, self.step_len, self.iter_num, self.sample_state, self.isValid)
-        planner = IntegratedRRT(start_j, goal_j, self.step_len, self.iter_num, self.sample_state, self.isValid)
-        path = planner.planning()
-
-        # og_path = og.PathGeometric(self.si)
-        # for q in path:
-        #     state = self.si.allocState()
-        #     state[0] = q[0]
-        #     state[1] = q[1]
-        #     state[2] = q[2]
-        #     state[3] = q[3]
-        #     state[4] = q[4]
-        #     state[5] = q[5]
-        #     state[6] = q[6]
-        #     og_path.append(state)
-        # simplifier = og.PathSimplifier(self.si)
-        # simplifier.simplifyMax(og_path)
-
-        # state_count = og_path.getStateCount()
-        # path = np.zeros((state_count, self.ndof), dtype=float)
-        # for i_state in range(state_count):
-        #     state = og_path.getState(i_state)
-        #     path_i = np.zeros((self.ndof), dtype=float)
-        #     for i_dof in range(self.ndof):
-        #         path_i[i_dof] = state[i_dof]
-        #     path[i_state] = path_i
+        path = self.ori_plan(start_j, goal_j)
+        if path is None:
+            return None
+        path = self.path_simplify(path)
         return path
 
+    def ori_plan(self, start_j, goal_j):
+        self.s_start = Node(start_j)
+        self.s_goal = Node(goal_j)
 
-class Node:
-    def __init__(self, n):
-        self.coord = np.array(n)
-        self.parent = None
-
-
-class RRTConnect:
-    def __init__(self, s_start, s_goal, step_len, iter_max, sample_func, collision_func):
-        self.s_start = Node(s_start)
-        self.s_goal = Node(s_goal)
-        self.step_len = step_len
-        self.iter_max = iter_max
         self.V1 = [self.s_start]
         self.V2 = [self.s_goal]
-
-        self._is_collision = collision_func
-        self._generate_random_node = sample_func
-        self.i = 0
-        pass
-
-    def generate_random_node(self):
-        self.i += 1
-        print(self.i)
-        return Node(self._generate_random_node())
-
-    def is_collision(self, node_a, node_b):
-        return not self._is_collision(node_a.coord, node_b.coord)
-
-    def planning(self):
         for i in range(self.iter_max):
-            node_rand = self.generate_random_node()
+            node_rand = self.sample_state()
             node_near = self.nearest_neighbor(self.V1, node_rand)
             node_new = self.new_state(node_near, node_rand)
 
-            if node_new and not self.is_collision(node_near, node_new):
+            if node_new and self.isValid(node_near.coord, node_new.coord):
                 self.V1.append(node_new)
                 node_near_prim = self.nearest_neighbor(self.V2, node_new)
                 node_new_prim = self.new_state(node_near_prim, node_new)
 
-                if node_new_prim and not self.is_collision(node_new_prim, node_near_prim):
+                if node_new_prim and not self.isValid(node_new_prim.coord, node_near_prim.coord):
                     self.V2.append(node_new_prim)
 
                     while True:
@@ -385,42 +382,111 @@ class RRTConnect:
 
         return False
 
-        
-class IntegratedRRT:
-    def __init__(self, s_start, s_goal, step_len, iter_max, sample_func, collision_func):
-        self.s_start = Node(s_start)
-        self.s_goal = Node(s_goal)
-        self.step_len = step_len
-        self.iter_max = iter_max
-        self.T = [self.s_start]
 
-        self._is_collision = collision_func
-        self._generate_random_node = sample_func
-        self.i = 0
+class INode:
+    def __init__(self, n):
+        self.coord = np.array(n)
+        self.parent = None
+        # score
+        self.goal_score = None
+        self.obstacle_score = None
+        self.score = None
+        self.failure_cnt = 0
+
+    
+class IntegratedRRTPlanner(RRTPlanner):
+    def __init__(self, ri, obstacles, failure_max_cnt, step_len, iter_num, min_distances=None, min_distances_start_goal=None):
+        super().__init__(ri, obstacles, iter_num, min_distances, min_distances_start_goal)
+
+        # 参数
+        self.failure_max_cnt = failure_max_cnt
         pass
 
-    def generate_random_node(self):
-        self.i += 1
-        print(self.i)
-        return Node(self._generate_random_node())
+    def plan(self, start_j, goal_pose_T):
+        path = self.ori_plan(start_j, goal_pose_T)
+        if path is None:
+            return None
+        # path = self.path_simplify(path)
+        return path
 
-    def is_collision(self, node_a, node_b):
-        return not self._is_collision(node_a.coord, node_b.coord)
-
-    def planning(self):
+    def ori_plan(self, start_j, goal_pose_T):
+        self.s_start = INode(start_j)
+        self.T = [self.s_start]
+        self.ranking_nodes = [self.s_start]
+        self.node_score(self.s_start)
+        
         for i in range(self.iter_max):
-            node_rand = self.generate_random_node()
-            node_near = self.nearest_neighbor(self.T, node_rand)
+            ############ EXTEND
+            # node_rand = self.sample_state()
+            # node_near = self.nearest_neighbor(self.T, node_rand)
+            # node_new = self.new_state(node_near, node_rand)
+
+            # if node_new and not self.is_collision(node_near, node_new):
+            #     self.T.append(node_new)
+            #     dist = self.node_distance(self.s_goal, node_new)
+            #     if dist < self.step_len:  # 小于步长，直接连接到终点
+            #         node_new = self.new_state(node_new, self.s_goal)
+            #         return self.extract_path(node_new)
+            ############ EXTEND
+
+            ############ EXTEND_HEURISTIC
+            node_rand = self.sample_state()
+            node_near = self.ranking_nodes[-1] 
             node_new = self.new_state(node_near, node_rand)
 
-            if node_new and not self.is_collision(node_near, node_new):
-                self.T.append(node_new)
-                dist = self.node_distance(self.s_goal, node_new)
-                if dist < self.step_len:  # 小于步长，直接连接到终点
-                    node_new = self.new_state(node_new, self.s_goal)
-                    return self.extract_path(node_new)
+            node_near_goal_score = self.goal_score(node_near)
+            node_new_goal_score = self.goal_score(node_new)
+            if node_new and self.isValid(node_new.coord, node_new.coord) and (node_new_goal_score > node_near_goal_score):
+                self.add_node(node_new)
+            else:
+                node_near.failure_cnt += 1
+                if node_near.failure_cnt > self.failure_max_cnt:
+                    self.ranking_nodes.remove(node_near)
+                    node_near.parent.failure_cnt = self.failure_max_cnt
+            ############ EXTEND_HEURISTIC
         return None
-    
+
+    ############################# Planning ############################# 
+    def sample_state(self, *args, **kwargs):
+        # TODO 添加 non-uniform sample
+        # 完全随机
+        q = (
+            np.random.random(self.ndof) * (self.upper - self.lower)
+            + self.lower
+        )
+        if self.isValid(q, q):
+            return INode(q)
+        else:
+            return self.sample_state()
+
+    def add_node(self, n):
+        self.T.append(n)
+        self.node_score(n)
+        # 高效地插入新节点，保持 ranking 的顺序
+        bisect.insort(self.ranking_nodes, n, key=lambda x: x.score)
+        pass
+
+    def node_score(self, n, goal_weight=1, obstacle_weight=1):
+        # 根据与障碍物的距离和、终点的距离计算某个节点的得分
+        # 根据得分维持 ranking 列表的有序性
+        goal_score = self.goal_score(n)
+        obstacle_score = self.obstacle_score(n)
+        weighted_sum = goal_weight * goal_score + obstacle_weight * obstacle_score
+
+        n.goal_score = goal_score
+        n.obstacle_score = obstacle_score
+        n.score = weighted_sum        
+        return weighted_sum, goal_score, obstacle_score
+
+    def goal_score(self, n):
+        # TODO
+        # 1. 主要关注末端 pose，先计算末端 pose
+        return -np.linalg.norm(n.coord - self.s_goal.coord)
+
+    def obstacle_score(self, n):
+        # TODO
+        return 0
+
     def node_distance(self, n1, n2):
         return np.linalg.norm(n1.coord - n2.coord)
 
@@ -431,9 +497,12 @@ class IntegratedRRT:
         v = node_end.coord - node_start.coord
         dist = np.linalg.norm(v)
         unit_v = v / (dist+1e-8)  # @note avoid zero division
+
+        # TODO 改为 dynamic scale
         dist = min(self.step_len, dist)
+
         new_coord = node_start.coord + dist * unit_v
-        node_new = Node(new_coord)
+        node_new = INode(new_coord)
         node_new.parent = node_start
         return node_new
 
@@ -448,7 +517,7 @@ class IntegratedRRT:
 
     @staticmethod
     def change_node(n1, n2):
-        new_node = Node(n2.coord)
+        new_node = INode(n2.coord)
         new_node.parent = n1
         return new_node
 
