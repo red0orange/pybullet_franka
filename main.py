@@ -122,45 +122,58 @@ class Interface:
             )
             all_test_poses[i, j] = c.pose
 
-        all_test_js = np.zeros(self.cube_centers.shape[:2], dtype=object)
-        for i, j in np.ndindex(self.cube_centers.shape[:2]):
-            pp.draw_pose(all_test_poses[i, j], length=0.1, width=0.01)
-            joint = self._env.pi.solve_ik(
-                all_test_poses[i, j],
-                move_target=self._env.pi.robot_model.tipLink,
-                n_init=10,
-                thre=0.05,
-                rthre=np.deg2rad(5),
-                obstacles=self.object_ids,
-                validate=True,
-            )
-            all_test_js[i, j] = joint
+        # 1b. 使用 Integrated RRT 的方法
+        if True:
+            for i, j in np.ndindex(self.cube_centers.shape[:2]):
+                pose = all_test_poses[i, j]
+                T = utils.tf.pybullet2T(pose)
+                target_js = self._env.pi.plan(T, obstacles=self.object_ids)
+                if target_js is None:
+                    print("target_js is None")
+                    continue
+                self.movejs(target_js, time_scale=5, retry=True)
 
-        for i, j in np.ndindex(self.cube_centers.shape[:2]):
-            # # home
-            # home_js = self._env.pi.planj(self._env.pi.homej, obstacles=self.object_ids)
-            # if home_js is None:
-            #     print("home_js is None")
-            #     continue
-            # self.movejs(home_js, time_scale=5, retry=True)
+        # 1a. 使用传统 IK + RRT 的方法
+        if False:
+            all_test_js = np.zeros(self.cube_centers.shape[:2], dtype=object)
+            for i, j in np.ndindex(self.cube_centers.shape[:2]):
+                pp.draw_pose(all_test_poses[i, j], length=0.1, width=0.01)
+                joint = self._env.pi.solve_ik(
+                    all_test_poses[i, j],
+                    move_target=self._env.pi.robot_model.tipLink,
+                    n_init=10,
+                    thre=0.05,
+                    rthre=np.deg2rad(5),
+                    obstacles=self.object_ids,
+                    validate=True,
+                )
+                all_test_js[i, j] = joint
 
-            # target
-            target_j = all_test_js[i, j]
-            if target_j is None:
-                print("target_j is None")
-                continue
-            target_js = self._env.pi.planj(target_j, obstacles=self.object_ids)
-            if target_js is None:
-                print("target_js is None")
-                continue
-            self.movejs(target_js, time_scale=5, retry=True)
+            for i, j in np.ndindex(self.cube_centers.shape[:2]):
+                # # home
+                # home_js = self._env.pi.planj(self._env.pi.homej, obstacles=self.object_ids)
+                # if home_js is None:
+                #     print("home_js is None")
+                #     continue
+                # self.movejs(home_js, time_scale=5, retry=True)
+
+                # target
+                target_j = all_test_js[i, j]
+                if target_j is None:
+                    print("target_j is None")
+                    continue
+                target_js = self._env.pi.planj(target_j, obstacles=self.object_ids)
+                if target_js is None:
+                    print("target_js is None")
+                    continue
+                self.movejs(target_js, time_scale=5, retry=True)
 
 
-        # for i, j in tqdm(enumerate(all_test_js), desc="Scan Scene"):
-        #     if j is None: continue
-        #     for _ in self._env.pi.movej(j):
-        #         pp.step_simulation()
-        #         time.sleep(1 / 240)
+            # for i, j in tqdm(enumerate(all_test_js), desc="Scan Scene"):
+            #     if j is None: continue
+            #     for _ in self._env.pi.movej(j):
+            #         pp.step_simulation()
+            #         time.sleep(1 / 240)
         pass
 
 

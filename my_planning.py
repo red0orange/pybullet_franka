@@ -1,4 +1,5 @@
 import bisect
+import math
 import copy
 import itertools
 from functools import partial
@@ -9,6 +10,8 @@ from ompl import geometric as og
 from ompl import util as ou
 import pybullet as p
 import pybullet_planning as pp
+
+from utils.tf import *
 
 
 class pbValidityChecker(ob.StateValidityChecker):
@@ -387,11 +390,39 @@ class INode:
     def __init__(self, n):
         self.coord = np.array(n)
         self.parent = None
+
+        # distance
+        self.self_collision_closest_distance = None
+        self.collision_closest_distance = None
+        self.limit_distance = None
+
         # score
         self.goal_score = None
         self.obstacle_score = None
         self.score = None
+
+        # 
+        self.joint_links_pose = None
+        self.ee_pose = None
+
         self.failure_cnt = 0
+
+    def get_pose(self, ri, ready=False):
+        if self.joint_links_pose is None:
+            if ready == False:
+                with pp.WorldSaver():
+                    ri.setj(self.coord)
+                    joint_links_T, ee_T = ri.get_whole_pose()
+                    self.joint_links_pose = joint_links_T
+                    self.ee_pose = ee_T
+            else:
+                joint_links_T, ee_T = ri.get_whole_pose()
+                self.joint_links_pose = joint_links_T
+                self.ee_pose = ee_T
+        else:
+            # print("不重复初始化")
+            pass
+        pass
 
     
 class IntegratedRRTPlanner(RRTPlanner):
@@ -411,9 +442,14 @@ class IntegratedRRTPlanner(RRTPlanner):
 
     def ori_plan(self, start_j, goal_pose_T):
         self.s_start = INode(start_j)
+        self.goal_pose_T = goal_pose_T
         self.T = [self.s_start]
         self.ranking_nodes = [self.s_start]
-        self.node_score(self.s_start)
+        self.node_init(self.s_start)
+
+        if not self.isValid(self.s_start):
+            print("起点不可行")
+        self.node_init(self.s_start)
         
         for i in range(self.iter_max):
             ############ EXTEND
@@ -431,18 +467,24 @@ class IntegratedRRTPlanner(RRTPlanner):
 
             ############ EXTEND_HEURISTIC
             node_rand = self.sample_state()
+            self.node_init(node_rand)
             node_near = self.ranking_nodes[-1] 
             node_new = self.new_state(node_near, node_rand)
+            self.node_init(node_new)
 
             node_near_goal_score = self.goal_score(node_near)
             node_new_goal_score = self.goal_score(node_new)
-            if node_new and self.isValid(node_new.coord, node_new.coord) and (node_new_goal_score > node_near_goal_score):
+            if node_new and self.isValid(node_new) and (node_new_goal_score > node_near_goal_score):
                 self.add_node(node_new)
+                # return
+                if abs(node_new_goal_score) < 0.05:
+                    return self.extract_path(node_new)
             else:
                 node_near.failure_cnt += 1
                 if node_near.failure_cnt > self.failure_max_cnt:
                     self.ranking_nodes.remove(node_near)
                     node_near.parent.failure_cnt = self.failure_max_cnt
+            
             ############ EXTEND_HEURISTIC
         return None
 
@@ -454,34 +496,49 @@ class IntegratedRRTPlanner(RRTPlanner):
             np.random.random(self.ndof) * (self.upper - self.lower)
             + self.lower
         )
-        if self.isValid(q, q):
-            return INode(q)
+        n = INode(q)
+        if self.isValid(n):
+            return n
         else:
             return self.sample_state()
 
+    @staticmethod
+    def insort_with_key(data, item, key_func=None):
+        if key_func is None:
+            # 如果没有提供 key 函数，使用默认的 bisect_left
+            position = bisect.bisect_left(data, item)
+        else:
+            # 使用 key 函数处理 item 和 data 中的每个元素
+            item_key = key_func(item)
+            position = bisect.bisect_left([key_func(x) for x in data], item_key)
+
+        # 插入元素
+        data.insert(position, item)
+
     def add_node(self, n):
         self.T.append(n)
-        self.node_score(n)
         # 高效地插入新节点，保持 ranking 的顺序
-        bisect.insort(self.ranking_nodes, n, key=lambda x: x.score)
+        self.insort_with_key(self.ranking_nodes, n, key_func=lambda x: x.score)
         pass
 
-    def node_score(self, n, goal_weight=1, obstacle_weight=1):
+    def node_init(self, n, goal_weight=1, obstacle_weight=1):
+        n.get_pose(self.ri, ready=False)
+
         # 根据与障碍物的距离和、终点的距离计算某个节点的得分
         # 根据得分维持 ranking 列表的有序性
-        goal_score = self.goal_score(n)
-        obstacle_score = self.obstacle_score(n)
-        weighted_sum = goal_weight * goal_score + obstacle_weight * obstacle_score
-
-        n.goal_score = goal_score
-        n.obstacle_score = obstacle_score
-        n.score = weighted_sum        
-        return weighted_sum, goal_score, obstacle_score
+        n.goal_score = self.goal_score(n)
+        n.obstacle_score = self.obstacle_score(n)
+        n.score = goal_weight * n.goal_score + obstacle_weight * n.obstacle_score
+        return n
 
     def goal_score(self, n):
         # TODO
-        # 1. 主要关注末端 pose，先计算末端 pose
-        return -np.linalg.norm(n.coord - self.s_goal.coord)
+        trans_weight, angle_weight = 1, 0.1
+
+        trans = np.linalg.norm(n.ee_pose[:3, 3] - self.goal_pose_T[:3, 3])
+        angle = angle_between_z_axis(n.ee_pose, self.goal_pose_T) / np.pi * 180
+        score = -(trans_weight * trans + angle_weight * angle)
+        return score
 
     def obstacle_score(self, n):
         # TODO
@@ -493,15 +550,27 @@ class IntegratedRRTPlanner(RRTPlanner):
     def nearest_neighbor(self, node_list, n):
         return node_list[int(np.argmin([np.linalg.norm(nd.coord - n.coord) for nd in node_list]))]
 
+    @staticmethod
+    def cal_scale(q_d, closest_distance):
+        # From: Geraerts, Roland, and Mark H. Overmars. "On improving the clearance for robots in high-dimensional configuration spaces." 2005 IEEE/RSJ International Conference on Intelligent Robots and Systems. IEEE, 2005.
+        # q_d: normalized direction joint between cur_node and rand_new_node
+        # weight from its paper: 6, 6, 6, 2, 2, 2, 2
+        # min scale: 0.1
+        weights = np.array([6, 6, 6, 2, 2, 2, 2])
+        min_scale = 0.1
+        scale = closest_distance / np.linalg.norm(weights * q_d)
+        return max(min_scale, scale)
+
     def new_state(self, node_start, node_end):
         v = node_end.coord - node_start.coord
         dist = np.linalg.norm(v)
         unit_v = v / (dist+1e-8)  # @note avoid zero division
 
-        # TODO 改为 dynamic scale
-        dist = min(self.step_len, dist)
+        # min_closest_distance = min(node_start.self_collision_closest_distance, node_start.collision_closest_distance)
+        min_closest_distance = node_start.collision_closest_distance
+        scale = self.cal_scale(unit_v, min_closest_distance)
 
-        new_coord = node_start.coord + dist * unit_v
+        new_coord = node_start.coord + scale * unit_v
         node_new = INode(new_coord)
         node_new.parent = node_start
         return node_new
@@ -527,3 +596,158 @@ class IntegratedRRTPlanner(RRTPlanner):
             return True
 
         return False
+
+    ############################# Agent ############################# 
+    def isValid(self, n):
+        state = n.coord
+
+        limit_is_valid, limit_distances = self.check_joint_limits(state)
+        if not limit_is_valid:
+            return False
+
+        j = [state[i] for i in range(self.ndof)]
+
+        with pp.WorldSaver():
+            self.ri.setj(j)
+
+            n.get_pose(self.ri, ready=True)
+
+            self_collision_is_valid, self_collision_closest_distance = self.check_self_collision() 
+            collision_is_valid, collision_closest_distance = self.check_collision(self.obstacles)
+            pass
+
+        if (not self_collision_is_valid) or (not collision_is_valid):
+            return False 
+
+        n.limit_distance = np.max(limit_distances)
+        n.collision_closest_distance = collision_closest_distance
+        n.self_collision_closest_distance = self_collision_closest_distance
+
+        return True
+
+    def check_self_collision(self, min_distances=None):
+        # 添加返回距离
+        min_distances = min_distances or {}
+
+        is_colliding = False
+
+        links = pp.get_links(self.ri.robot)
+        distance = 0.1  # TODO 可能影响效率，需要调整
+        closest_distance = distance
+        for link_a, link_b in itertools.combinations(links, 2):
+            link_name_a = pp.get_link_name(self.ri.robot, link_a)
+            link_name_b = pp.get_link_name(self.ri.robot, link_b)
+
+            assert link_b > link_a
+            if link_b - link_a == 1:
+                continue
+
+            # XXX: specific configurations for panda_drl.urdf
+            # panda_link5: front arm
+            # panda_link6: arm head
+            # panda_link7: wrist
+            # panda_link8: palm tip
+            if (
+                link_name_a == "panda_link7"
+                and link_name_b == "panda_suction_gripper"
+            ):
+                continue
+            if (
+                link_name_a == "panda_link5"
+                and link_name_b == "panda_suction_gripper"
+            ):
+                continue
+
+            # XXX: specific configurations for panda_suction.urdf
+            # panda_link7: wrist
+            if link_name_a == "panda_link7" and link_name_b == "baseLink":
+                continue
+
+            # XXX: specific configurations for panda_suction.urdf
+            # panda_link7: wrist
+            if (
+                link_name_a == "panda_link7"
+                and link_name_b == "panda_hand"
+            ):
+                continue
+            if (
+                link_name_a == "panda_hand"
+                and link_name_b == "panda_finger_link1"
+            ):
+                continue
+            if (
+                link_name_a == "panda_hand"
+                and link_name_b == "panda_finger_link2"
+            ):
+                continue
+            
+            closest_points_info = p.getClosestPoints(
+                                        bodyA=self.ri.robot,
+                                        linkIndexA=link_a,
+                                        bodyB=self.ri.robot,
+                                        linkIndexB=link_b,
+                                        distance=distance,
+                                    )
+            if len(closest_points_info) == 0:
+                is_colliding_i = False
+            else:
+                closest_distances = [i[8] for i in closest_points_info]
+                closest_distances = sorted(closest_distances)
+                if closest_distances[0] < closest_distance:
+                    closest_distance = closest_distances[0]
+                is_colliding_i = (closest_distances[0] < 0)
+            is_colliding |= is_colliding_i
+
+        return (not is_colliding), closest_distance
+
+    def check_collision(self, ids_to_check):
+        # 添加返回距离
+
+        if len(ids_to_check) == 0:
+            return True, np.inf
+
+        is_colliding = False
+        # 只考虑小于 distance 的惩罚
+        distance = 0.1  # TODO 可能影响效率，需要调整
+        closest_distance = distance
+
+        # 利用Pybullet检查每个Link与最后一个障碍物的最小距离？
+        # 为什么只检查最后一个物体？看下面，用递归来逐个检查。
+        for link in pp.get_links(self.ri.robot):
+            link_name = pp.get_joint_name(self.ri.robot, link).decode()
+            closest_points_info = p.getClosestPoints(
+                                    bodyA=self.ri.robot,
+                                    linkIndexA=link,
+                                    bodyB=ids_to_check[-1],
+                                    linkIndexB=-1,
+                                    distance=distance,
+                                )
+            if len(closest_points_info) != 0:
+                closest_distances = [i[8] for i in closest_points_info]
+                closest_distances = sorted(closest_distances)
+                if link_name != "panda_joint1" and link_name != "panda_joint2":
+                    if closest_distances[0] < closest_distance:
+                        closest_distance = closest_distances[0]
+                is_colliding |= (closest_distances[0] < 0)
+
+        if is_colliding:
+            return False, closest_distance
+        else:
+            # 这里用递归来检查每一个
+            is_colliding, sub_closest_distance = self.check_collision(ids_to_check[0:-1])
+            if sub_closest_distance < closest_distance:
+                closest_distance = sub_closest_distance
+            return is_colliding, closest_distance
+
+    def check_joint_limits(self, state):
+        limit_distances = [None] * self.ndof
+        for i in range(self.ndof):
+
+            upper_distance = self.upper[i] - state[i]
+            lower_distance = state[i] - self.lower[i]
+            limit_distances[i] = max(upper_distance, lower_distance)
+
+            if state[i] > self.upper[i] or state[i] < self.lower[i]:
+                return False, limit_distances
+
+        return True, limit_distances

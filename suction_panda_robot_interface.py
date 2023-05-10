@@ -40,7 +40,10 @@ class SuctionPandaRobotInterface:
         self.robot = pybullet_planning.load_pybullet(
             urdf_file, fixed_base=True
         )
+        self.ee_link_name = "tipLink"
+        self.joint_links_name = ["panda_link{}".format(i) for i in range(9)]
         self.ee = pybullet_planning.link_from_name(self.robot, "tipLink")
+        self.joint_links = [pybullet_planning.link_from_name(self.robot, name) for name in self.joint_links_name]
 
         self.gripper = SuctionGripper(
             self.robot,
@@ -274,6 +277,20 @@ class SuctionPandaRobotInterface:
         )
         return planner.validityChecker.isValid(j)
 
+    def plan(self, pose, obstacles):
+        # 1a. 使用 Ours IntegratedRRTPlanner
+        step_len = 0.1
+        iter_num = 100000
+        failure_max_cnt = 200
+        planner = IntegratedRRTPlanner(self, obstacles, failure_max_cnt, None, iter_num)
+
+        result = planner.plan(self.getj(), pose)
+        if result is None:
+            logger.warning("No solution found")
+            return
+
+        return result
+
     def planj(self, *args, **kwargs):
         # return self.ori_planj(*args, **kwargs)
         return self.my_planj(*args, **kwargs)
@@ -286,6 +303,7 @@ class SuctionPandaRobotInterface:
         min_distances_start_goal=None,
         planner_range=0,
     ):
+        # 1. 选择规划器
         step_len = 0.1
         iter_num = 100000
         goal_sample_rate = 0.5
@@ -300,38 +318,9 @@ class SuctionPandaRobotInterface:
             return
 
         result = planner.plan(self.getj(), j)
-
-        # step_len = 0.1
-        # iter_num = 100000
-        # planner = MyPbPlanner(self, obstacles, step_len, iter_num)
-
-        # if not planner.isValid(self.getj(), self.getj()):
-        #     logger.warning("Start state is invalid")
-        #     return
-
-        # if not planner.isValid(self.getj(), j):
-        #     logger.warning("Goal state is invalid")
-        #     return
-
-        # result = planner.plan(self.getj(), j)
-
         if result is None:
             logger.warning("No solution found")
             return
-
-        # ndof = len(self.joints)
-        # state_count = result.getStateCount()
-        # path = np.zeros((state_count, ndof), dtype=float)
-        # for i_state in range(state_count):
-        #     state = result.getState(i_state)
-        #     path_i = np.zeros((ndof,), dtype=float)
-        #     for i_dof in range(ndof):
-        #         path_i[i_dof] = state[i_dof]
-        #     path[i_state] = path_i
-
-        # if not np.allclose(j, path[-1]):
-        #     # the goal is not reached
-        #     return
 
         return result
 
@@ -447,6 +436,12 @@ class SuctionPandaRobotInterface:
             joint_list=joint_list,
             # root_link=self.robot_model.root_link,
         )
+
+    def get_whole_pose(self):
+        self.update_robot_model()
+        joint_links_T = [getattr(self.robot_model, name).worldcoords().T() for name in self.joint_links_name]
+        ee_T = getattr(self.robot_model, self.ee_link_name).worldcoords().T()
+        return joint_links_T, ee_T
 
     def get_pose(self, name):
         self.update_robot_model()
