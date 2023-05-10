@@ -281,7 +281,7 @@ class SuctionPandaRobotInterface:
         # 1a. 使用 Ours IntegratedRRTPlanner
         step_len = 0.1
         iter_num = 100000
-        failure_max_cnt = 200
+        failure_max_cnt = 10000
         planner = IntegratedRRTPlanner(self, obstacles, failure_max_cnt, None, iter_num)
 
         result = planner.plan(self.getj(), pose)

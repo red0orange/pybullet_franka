@@ -477,7 +477,7 @@ class IntegratedRRTPlanner(RRTPlanner):
             if node_new and self.isValid(node_new) and (node_new_goal_score > node_near_goal_score):
                 self.add_node(node_new)
                 # return
-                if abs(node_new_goal_score) < 0.05:
+                if abs(node_new_goal_score) < 0.015:
                     return self.extract_path(node_new)
             else:
                 node_near.failure_cnt += 1
@@ -497,10 +497,11 @@ class IntegratedRRTPlanner(RRTPlanner):
             + self.lower
         )
         n = INode(q)
-        if self.isValid(n):
-            return n
-        else:
-            return self.sample_state()
+        return n
+        # if self.isValid(n):
+        #     return n
+        # else:
+        #     return self.sample_state()
 
     @staticmethod
     def insort_with_key(data, item, key_func=None):
@@ -533,7 +534,7 @@ class IntegratedRRTPlanner(RRTPlanner):
 
     def goal_score(self, n):
         # TODO
-        trans_weight, angle_weight = 1, 0.1
+        trans_weight, angle_weight = 1, 0.0001
 
         trans = np.linalg.norm(n.ee_pose[:3, 3] - self.goal_pose_T[:3, 3])
         angle = angle_between_z_axis(n.ee_pose, self.goal_pose_T) / np.pi * 180
