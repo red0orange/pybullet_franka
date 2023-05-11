@@ -23,8 +23,8 @@ home = path.Path("~").expanduser()
 class Interface:
 
     table_center = np.array([0.75, 0, -0.20])
-    pile_center = np.array([0.35, 0, 0.32])
-    pile_size = np.array([[-0.10, -0.25, 0.0], [0.35, 0.25, 0.60]])
+    pile_center = np.array([0.45, 0, 0.32])
+    pile_size = np.array([[-0.10, -0.15, 0.0], [0.35, 0.15, 0.60]])
     table_center.setflags(write=False)
     pile_center.setflags(write=False)
 
@@ -64,9 +64,9 @@ class Interface:
             quat = tf.transformations.quaternion_from_euler(0, 0, np.pi/2)
             pp.set_pose(self.table_id, ([self.table_center[0] - 0.1, self.table_center[1], self.table_center[2]], quat))
 
-        block_scale = 0.06
-        col_num = 5
-        row_num = 4
+        block_scale = 0.05
+        col_num = 3
+        row_num = 3
         height_num = 3
         # col_num = 2
         # row_num = 2

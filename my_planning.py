@@ -543,15 +543,19 @@ class IntegratedRRTPlanner(RRTPlanner):
     def goal_dist(self, n):
         trans = np.linalg.norm(n.ee_pose[:3, 3] - self.goal_pose_T[:3, 3])
         # angle = angle_between_z_axis(n.ee_pose, self.goal_pose_T) / np.pi * 180
-        angle = np.arccos(-n.ee_pose[2, 2]) / np.pi * 180
+        angle = np.abs(np.arccos(-n.ee_pose[2, 2])) / np.pi * 180
         return trans, angle
 
     def goal_score(self, n):
         # TODO
-        trans_weight, angle_weight = 1, 0.0011
-
         trans, angle = self.goal_dist(n)
-        score = -(trans_weight * trans + angle_weight * angle)
+        angle = angle / 180 * np.pi
+        if trans > 0.2:
+            score = -(1 * np.exp(trans) + (1/4) * np.exp(np.pi))
+        else:
+            score = -(1 * np.exp(trans) + (1/4) * np.exp(angle))
+
+        # score = -(1 * np.exp(trans) + (1/4) * np.exp(angle))
         return score
 
     def obstacle_score(self, n):

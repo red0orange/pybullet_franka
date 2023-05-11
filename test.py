@@ -1,10 +1,23 @@
-import bisect
+import numpy as np
+import matplotlib.pyplot as plt
 
-sorted_list = [1, 3, 4, 6, 9]
-new_value = 5
 
-insert_position = bisect.bisect_left(sorted_list, new_value)
-sorted_list.insert(insert_position, new_value)
+a = 3
+trans = np.linspace(0, 2, 200)
+trans_score = np.exp(a * trans) - 1
+# trans_score[100:] = np.exp(a * trans[100])
 
-print("Insert position:", insert_position)  # 输出：Insert position: 3
-print("Sorted list:", sorted_list)          # 输出：Sorted list: [1, 3, 4, 5, 6, 9]
+b = 2
+angle = np.linspace(0, np.pi / 2, 200)
+angle_score = np.exp(b * angle) - 1
+# angle_score[100:] = np.exp(b * angle[100]) - 1
+
+plt.plot(trans, trans_score, label='trans')
+plt.plot(angle, angle_score, label='angle')
+plt.scatter([trans[20]], [trans_score[20]], c='r', marker='o')
+plt.scatter([angle[66]], [angle_score[66]], c='r', marker='o')
+plt.xlim(0, 1)
+plt.ylim(0, 30)
+
+plt.legend()
+plt.show()
