@@ -467,7 +467,6 @@ class IntegratedRRTPlanner(RRTPlanner):
 
             ############ EXTEND_HEURISTIC
             node_rand = self.sample_state()
-            self.node_init(node_rand)
             node_near = self.ranking_nodes[-1] 
             node_new = self.new_state(node_near, node_rand)
             self.node_init(node_new)
@@ -477,7 +476,12 @@ class IntegratedRRTPlanner(RRTPlanner):
             if node_new and self.isValid(node_new) and (node_new_goal_score > node_near_goal_score):
                 self.add_node(node_new)
                 # return
-                if abs(node_new_goal_score) < 0.015:
+                print("node_new_goal_score: ", node_new_goal_score)
+
+                # 判断是否到终点
+                trans, angle = self.goal_dist(node_new)
+                # if trans < 0.05 and angle < 20:
+                if trans < 0.02:
                     return self.extract_path(node_new)
             else:
                 node_near.failure_cnt += 1
@@ -491,7 +495,11 @@ class IntegratedRRTPlanner(RRTPlanner):
     ############################# Planning ############################# 
     def sample_state(self, *args, **kwargs):
         # TODO 添加 non-uniform sample
-        # 完全随机
+
+        # sample_range = len(self.upper) * [np.max(self.upper - self.lower)]
+        # delta = np.random.random(self.ndof) * sample_range
+        # q = (delta + self.lower)
+
         q = (
             np.random.random(self.ndof) * (self.upper - self.lower)
             + self.lower
@@ -532,12 +540,17 @@ class IntegratedRRTPlanner(RRTPlanner):
         n.score = goal_weight * n.goal_score + obstacle_weight * n.obstacle_score
         return n
 
+    def goal_dist(self, n):
+        trans = np.linalg.norm(n.ee_pose[:3, 3] - self.goal_pose_T[:3, 3])
+        # angle = angle_between_z_axis(n.ee_pose, self.goal_pose_T) / np.pi * 180
+        angle = np.arccos(-n.ee_pose[2, 2]) / np.pi * 180
+        return trans, angle
+
     def goal_score(self, n):
         # TODO
-        trans_weight, angle_weight = 1, 0.0001
+        trans_weight, angle_weight = 1, 0.0011
 
-        trans = np.linalg.norm(n.ee_pose[:3, 3] - self.goal_pose_T[:3, 3])
-        angle = angle_between_z_axis(n.ee_pose, self.goal_pose_T) / np.pi * 180
+        trans, angle = self.goal_dist(n)
         score = -(trans_weight * trans + angle_weight * angle)
         return score
 
@@ -558,7 +571,7 @@ class IntegratedRRTPlanner(RRTPlanner):
         # weight from its paper: 6, 6, 6, 2, 2, 2, 2
         # min scale: 0.1
         weights = np.array([6, 6, 6, 2, 2, 2, 2])
-        min_scale = 0.1
+        min_scale = 0.01
         scale = closest_distance / np.linalg.norm(weights * q_d)
         return max(min_scale, scale)
 

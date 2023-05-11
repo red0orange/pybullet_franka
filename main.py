@@ -65,12 +65,12 @@ class Interface:
             pp.set_pose(self.table_id, ([self.table_center[0] - 0.1, self.table_center[1], self.table_center[2]], quat))
 
         block_scale = 0.06
-        # col_num = 5
-        # row_num = 4
-        # height_num = 4
-        col_num = 2
-        row_num = 2
+        col_num = 5
+        row_num = 4
         height_num = 3
+        # col_num = 2
+        # row_num = 2
+        # height_num = 3
 
         random.seed(seed)
         cube_matrix = np.random.randint(1, height_num, size=(row_num, col_num))
@@ -132,6 +132,15 @@ class Interface:
                     print("target_js is None")
                     continue
                 self.movejs(target_js, time_scale=5, retry=True)
+                print("Finish: {} {}".format(i, j))
+
+                # home
+                home_js = self._env.pi.planj(self._env.pi.homej, obstacles=self.object_ids)
+                if home_js is None:
+                    print("home_js is None")
+                    continue
+                self.movejs(home_js, time_scale=5, retry=True)
+
 
         # 1a. 使用传统 IK + RRT 的方法
         if False:
@@ -150,13 +159,6 @@ class Interface:
                 all_test_js[i, j] = joint
 
             for i, j in np.ndindex(self.cube_centers.shape[:2]):
-                # # home
-                # home_js = self._env.pi.planj(self._env.pi.homej, obstacles=self.object_ids)
-                # if home_js is None:
-                #     print("home_js is None")
-                #     continue
-                # self.movejs(home_js, time_scale=5, retry=True)
-
                 # target
                 target_j = all_test_js[i, j]
                 if target_j is None:
@@ -168,6 +170,12 @@ class Interface:
                     continue
                 self.movejs(target_js, time_scale=5, retry=True)
 
+                # home
+                home_js = self._env.pi.planj(self._env.pi.homej, obstacles=self.object_ids)
+                if home_js is None:
+                    print("home_js is None")
+                    continue
+                self.movejs(home_js, time_scale=5, retry=True)
 
             # for i, j in tqdm(enumerate(all_test_js), desc="Scan Scene"):
             #     if j is None: continue
