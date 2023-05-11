@@ -69,6 +69,10 @@ class SuctionPandaRobotInterface:
         self.joints = [j[0] for j in joints if j[2] == p.JOINT_REVOLUTE]
 
         self.homej = [0, -np.pi / 4, 0, -np.pi / 2, 0, np.pi / 4, np.pi / 4]
+        with pybullet_planning.WorldSaver():
+            self.setj(self.homej)
+            self.home_pose = self.get_pose("tipLink")
+
         for joint, joint_angle in zip(self.joints, self.homej):
             p.resetJointState(self.robot, joint, joint_angle)
         self.update_robot_model()
@@ -304,7 +308,7 @@ class SuctionPandaRobotInterface:
         planner_range=0,
     ):
         # 1. 选择规划器
-        step_len = 0.1
+        step_len = 0.01
         iter_num = 100000
         goal_sample_rate = 0.5
         planner = RRTConnectPlanner(self, obstacles, step_len, goal_sample_rate, iter_num)

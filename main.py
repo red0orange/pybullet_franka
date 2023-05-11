@@ -123,7 +123,8 @@ class Interface:
             all_test_poses[i, j] = c.pose
 
         # 1b. 使用 Integrated RRT 的方法
-        if True:
+        use_traditional = False
+        if not use_traditional:
             for i, j in np.ndindex(self.cube_centers.shape[:2]):
                 pose = all_test_poses[i, j]
                 T = utils.tf.pybullet2T(pose)
@@ -132,25 +133,24 @@ class Interface:
                     print("target_js is None")
                     continue
                 self.movejs(target_js, time_scale=5, retry=True)
-                print("Finish: {} {}".format(i, j))
+                print("Goal Finish: {} {}".format(i, j))
 
                 # home
-                home_js = self._env.pi.planj(self._env.pi.homej, obstacles=self.object_ids)
+                home_T = utils.tf.pybullet2T(self._env.pi.home_pose)
+                home_js = self._env.pi.plan(home_T, obstacles=self.object_ids)
                 if home_js is None:
                     print("home_js is None")
                     continue
                 self.movejs(home_js, time_scale=5, retry=True)
-
-
-        # 1a. 使用传统 IK + RRT 的方法
-        if False:
+                print("Home Finish: {} {}".format(i, j))
+        else:
             all_test_js = np.zeros(self.cube_centers.shape[:2], dtype=object)
             for i, j in np.ndindex(self.cube_centers.shape[:2]):
                 pp.draw_pose(all_test_poses[i, j], length=0.1, width=0.01)
                 joint = self._env.pi.solve_ik(
                     all_test_poses[i, j],
                     move_target=self._env.pi.robot_model.tipLink,
-                    n_init=10,
+                    n_init=100,
                     thre=0.05,
                     rthre=np.deg2rad(5),
                     obstacles=self.object_ids,
@@ -159,6 +159,7 @@ class Interface:
                 all_test_js[i, j] = joint
 
             for i, j in np.ndindex(self.cube_centers.shape[:2]):
+                if i != 3: continue
                 # target
                 target_j = all_test_js[i, j]
                 if target_j is None:
