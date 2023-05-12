@@ -17,6 +17,7 @@ class GraspTaskInterface(BaseTaskInterface):
     def test_real_pick(self):
         # 回归 Home pose
         self.reset_pose()
+        self.stop_grasp()
 
         # 设置抓取 Pose
         eye = np.array([0.4, 0, 0.5])
@@ -47,6 +48,7 @@ class GraspTaskInterface(BaseTaskInterface):
         self.movejs(target_js, time_scale=5, retry=True)
         self.start_grasp()
         time.sleep(2)
+        self.stop_grasp()
 
         # 回归 Home pose
         self.reset_pose()
