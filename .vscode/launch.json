@@ -10,7 +10,10 @@
             "request": "launch",
             "program": "${workspaceFolder}/grasp_task_interface.py",
             "console": "integratedTerminal",
-            "justMyCode": true
+            "justMyCode": false,
+            "env": {
+                "DISPLAY": ":0",
+            }
         },
         {
             "name": "Python: main",

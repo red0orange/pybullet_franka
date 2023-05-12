@@ -2,8 +2,10 @@ import time
 import IPython
 
 import rospy
+import numpy as np
 
 from base_task_interface import BaseTaskInterface
+import geometry
 
 
 class GraspTaskInterface(BaseTaskInterface):
@@ -17,24 +19,27 @@ class GraspTaskInterface(BaseTaskInterface):
         self.reset_pose()
 
         # 设置抓取 Pose
-        eye = [0.4, 0, 0.5]
-        target = eye + [0, 0, -0.1]
+        eye = np.array([0.4, 0, 0.5])
+        target = eye + np.array([0, 0, -0.1])
         c = geometry.Coordinate.from_matrix(
             geometry.look_at(eye, target, None)
         )
         goal_pose = c.pose
         # 求解 IK
-        joint = self._env.pi.solve_ik(
+        target_j = self._env.pi.solve_ik(
             goal_pose,
-            move_target=self._env.pi.robot_model.tipLink,
+            move_target=self._env.pi.robot_model.panda_hand,
             n_init=100,
             thre=0.05,
             rthre=np.deg2rad(5),
-            obstacles=self.object_ids,
+            # obstacles=self.object_ids,
             validate=True,
         )
         # Planning
-        target_js = self._env.pi.planj(target_j, obstacles=self.object_ids)
+        target_js = self._env.pi.planj(
+            target_j, 
+            # obstacles=self.object_ids
+        )
         if target_js is None:
             print("target_js is None")
             return
@@ -51,7 +56,8 @@ class GraspTaskInterface(BaseTaskInterface):
 def main():
     rospy.init_node("grasp_task_interface")
     
-    real = False
+    # real = False
+    real = True
     task_interface = GraspTaskInterface(real)
 
     time.sleep(2)
