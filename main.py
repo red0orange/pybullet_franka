@@ -123,9 +123,10 @@ class Interface:
             all_test_poses[i, j] = c.pose
 
         all_delta_time = []
-        for i in range(10):
+        for i in range(3):
             start_time = time.time()
             # 1b. 使用 Integrated RRT 的方法
+            # use_traditional = False
             use_traditional = True
             i = random.sample(list(range(self.cube_centers.shape[0])), k=1)[0]
             j = random.sample(list(range(self.cube_centers.shape[1])), k=1)[0]
@@ -140,6 +141,14 @@ class Interface:
                         continue
                     self.movejs(target_js, time_scale=5, retry=True)
                     print("Goal Finish: {} {}".format(i, j))
+
+                    path_length = 0
+                    for i in range(len(target_js) - 1):
+                        path_length += np.linalg.norm(target_js[i+1] - target_js[i])
+
+                    path_size = len(target_js)
+                    end_time = time.time()
+                    ik_time = 0
 
                     # home
                     home_T = utils.tf.pybullet2T(self._env.pi.home_pose)
@@ -164,6 +173,8 @@ class Interface:
                         validate=True,
                     )
                     all_test_js[i, j] = joint
+                    ik_time = time.time() - start_time
+                    print("ik_time: {}\n\n".format(time.time() - start_time))
 
                 if True:
                 # for i, j in np.ndindex(self.cube_centers.shape[:2]):
@@ -177,6 +188,12 @@ class Interface:
                         print("target_js is None")
                         continue
                     self.movejs(target_js, time_scale=5, retry=True)
+
+                    path_length = 0
+                    for i in range(len(target_js) - 1):
+                        path_length += np.linalg.norm(target_js[i+1] - target_js[i])
+                    path_size = len(target_js)
+                    end_time = time.time()
 
                     # home
                     home_j = self._env.pi.solve_ik(
@@ -201,11 +218,11 @@ class Interface:
                 #         time.sleep(1 / 240)
             pass
 
-            end_time = time.time()
             delta_time = end_time - start_time
             save_txt_path = "record_{}.txt".format(use_traditional)
             with open(save_txt_path, "a") as f:
-                f.write("delta_time: {}\n\n".format(delta_time))
+                f.write("all_time: {}\npath_length: {}\npath_size: {}\nik_time: {}\n\n".format(delta_time, path_length, path_size, ik_time))
+            print("delta_time: {}\n\n".format(delta_time))
             all_delta_time.append(delta_time)
         print("mean: {}".format(np.mean(all_delta_time)))
 
@@ -340,11 +357,11 @@ def main():
     interface = Interface()
     interface.pick()
 
-    while True:
-        p.stepSimulation()
-        time.sleep(0.05)
+    # while True:
+    #     p.stepSimulation()
+    #     time.sleep(0.05)
 
-    IPython.embed()
+    # IPython.embed()
 
 
 if __name__ == "__main__":

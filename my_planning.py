@@ -302,7 +302,7 @@ class RRTConnectPlanner(RRTPlanner):
         path = self.ori_plan(start_j, goal_j)
         if path is None:
             return None
-        path = self.path_simplify(path)
+        # path = self.path_simplify(path)
         return path
 
     def ori_plan(self, start_j, goal_j):
@@ -578,6 +578,11 @@ class IntegratedRRTPlanner(RRTPlanner):
         min_scale = 0.01
         scale = closest_distance / np.linalg.norm(weights * q_d)
         return max(min_scale, scale)
+
+    @staticmethod
+    def my_cal_scale(q_s, q_e):
+
+        pass
 
     def new_state(self, node_start, node_end):
         v = node_end.coord - node_start.coord
