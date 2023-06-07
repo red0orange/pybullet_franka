@@ -62,6 +62,10 @@
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
 
+  <depend>roscpp</depend>
+  <depend>cv_bridge</depend>
+  <depend>message_generation</depend>
+
 
   <!-- The export tag contains other, unspecified, tags -->
   <export>

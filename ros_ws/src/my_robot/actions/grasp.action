@@ -1,9 +1,8 @@
 # goal
-Sequence sequence
-float32 downsample_ratio
+geometry_msgs/PoseStamped grasp_pose
 ---
 # result
-CloudMap map
+bool success
 ---
 # feedback
-int32 idx_image
+int32 step_id
