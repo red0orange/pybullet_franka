@@ -7,12 +7,15 @@ import open3d as o3d
 import numpy as np
 from scipy.spatial import ConvexHull
 
+import tf
 import rospy
 import rospkg
 import actionlib
+import message_filters
+from cv_bridge import CvBridge, CvBridgeError
 
 import std_msgs.msg
-from sensor_msgs.msg import PointCloud2, PointField
+from sensor_msgs.msg import PointCloud2, PointField, CameraInfo, Image
 from geometry_msgs.msg import PoseStamped
 from my_robot.msg import graspAction, graspGoal, graspResult, graspFeedback
 
@@ -292,7 +295,7 @@ def depth2pc(depth, K, rgb=None, mask=None, max_depth=1.0):
 
 
 class Sampler(object):
-    def __init__(self):
+    def __init__(self, rgb_topic_name, depth_topic_name, camera_info_topic_name):
         # == SAM
         # self.sam = sam_model_registry["vit_b"](checkpoint="/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/sam_vit_b_01ec64.pth")
         self.sam = sam_model_registry["vit_h"](checkpoint="/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/sam_vit_h_4b8939.pth")
@@ -303,9 +306,77 @@ class Sampler(object):
         # == contact-graspnet API
         self.grasp_interface = ContactGraspAPI()
 
+        # == image subscriber
+        self.tf_listener = tf.listener.TransformListener()
+        self.bridge = CvBridge()
+
+        rospy.loginfo("Waiting camera_info")
+        camera_info = rospy.wait_for_message(camera_info_topic_name, CameraInfo)
+        self.fx, self.fy, self.cx, self.cy = (
+            camera_info.K[0],
+            camera_info.K[4],
+            camera_info.K[2],
+            camera_info.K[5],
+        )
+        self.K = np.array([[self.fx, 0, self.cx], [0, self.fy, self.cy], [0, 0, 1]])
+        self.image_width, self.image_height = camera_info.width, camera_info.height
+        rospy.loginfo("Get camera_info")
+
+        # == 主动进入一次采样
+        rospy.loginfo("Getting RGBD Image!")
+        rgb_msg = rospy.wait_for_message(rgb_topic_name, Image)
+        depth_msg = rospy.wait_for_message(depth_topic_name, Image)
+        rospy.loginfo("Get RGBD Image!")
+        rgb_image = self.bridge.imgmsg_to_cv2(rgb_msg, "bgr8")
+        depth_image = self.bridge.imgmsg_to_cv2(depth_msg, "16UC1")
+        depth_image = depth_image.astype(np.float32) / 1000.0
+        rospy.loginfo("Obtaining Pose!")
+        # ee_pose_T = self.get_cur_pose()
+        self.tf_listener.waitForTransform("panda_link0", "panda_hand", rospy.Time(), rospy.Duration(4.0))
+        (trans, quat) = self.tf_listener.lookupTransform("panda_link0", "panda_hand", rospy.Time(0))
+        ee_pose_T = sevenDof2T(list(trans) + list(quat))
+        ee_to_camera_pose = np.array([0.0389764, -0.0298156, 0.0737251, 0.00624646, -0.00743901, 0.714763, 0.699299])
+        ee_to_camera_T = sevenDof2T(ee_to_camera_pose)
+        camera_pose_T = np.dot(ee_pose_T, ee_to_camera_T)
+        rospy.loginfo("Obtain Pose!")
+        self.test_input(rgb_image, depth_image, self.K, pcd_T=camera_pose_T)
+
+        # self.rgb_subscriber = message_filters.Subscriber(rgb_topic_name, Image)
+        # self.depth_subscriber = message_filters.Subscriber(depth_topic_name, Image)
+        # self.rgbd_subscriber = message_filters.ApproximateTimeSynchronizer(
+        #     [self.rgb_subscriber, self.depth_subscriber],
+        #     1,
+        #     0.5,
+        # )
+        # self.rgbd_subscriber.registerCallback(self.rgbd_cb)
+        # self.flag = True
+
         # == for debug
         self.pcd_pub = rospy.Publisher("/debug_object_pcd", PointCloud2, queue_size=1)
         self.grasp_pose_pub = rospy.Publisher("/debug_grasp_poses", PoseStamped, queue_size=1)
+        pass
+
+    def rgbd_cb(self, rgb_msg, depth_msg):
+        if not self.flag:
+            return
+        self.flag = False
+        rospy.loginfo("Get RGBD Image!")
+        rgb_image = self.bridge.imgmsg_to_cv2(rgb_msg, "bgr8")
+        depth_image = self.bridge.imgmsg_to_cv2(depth_msg, "16UC1")
+        depth_image = depth_image.astype(np.float32) / 1000.0
+
+        rospy.loginfo("Obtaining Pose!")
+        # ee_pose_T = self.get_cur_pose()
+        self.tf_listener.waitForTransform("panda_link0", "panda_hand", rospy.Time(), rospy.Duration(4.0))
+        (trans, quat) = self.tf_listener.lookupTransform("panda_link0", "panda_hand", rospy.Time(0))
+        ee_pose_T = sevenDof2T(list(trans) + list(quat))
+
+        ee_to_camera_pose = np.array([0.0389764, -0.0298156, 0.0737251, 0.00624646, -0.00743901, 0.714763, 0.699299])
+        ee_to_camera_T = sevenDof2T(ee_to_camera_pose)
+        camera_pose_T = np.dot(ee_pose_T, ee_to_camera_T)
+        rospy.loginfo("Obtain Pose!")
+
+        self.test_input(rgb_image, depth_image, self.K, camera_pose_T)
         pass
 
     def sample(self):
@@ -313,10 +384,12 @@ class Sampler(object):
         pass
 
     def test_input(self, rgb_image, depth_image, K, pcd_T=None):
+        DEBUG = True
+
         # == 完整点云进行 Grasp Predict
         object_pcd, object_pcd_color, xy = depth2pc(depth_image, K, rgb=rgb_image, max_depth=0.5)
         Ts, grasp_scores, contact_pts = self.grasp_interface.infer(object_pcd)
-        my_visualize_grasps(object_pcd, Ts, grasp_scores)  # debug
+        if DEBUG: my_visualize_grasps(object_pcd, Ts, grasp_scores)  # debug
 
         # == prompt point 进行 SAM 物体选择
         prompt_point = get_click_coordinates(rgb_image)[0]
@@ -329,21 +402,22 @@ class Sampler(object):
         masks = sorted(masks, key=lambda x: np.sum(x), reverse=True)
         masks = [i for i in masks if np.sum(i) < 50000]  # @DEBUG 
         mask = masks[0]
-        cv2.imshow("mask", mask.astype(np.uint8) * 255)  # debug
-        cv2.waitKey(0)
+        if DEBUG: 
+            cv2.imshow("mask", mask.astype(np.uint8) * 255)  # debug
+            cv2.waitKey(0)
 
         # == 根据 mask 过滤物体的 Grasp
         segment_pc, _, _ = depth2pc(depth_image, K, mask=mask, rgb=rgb_image)
         filtered_indexes = filter_segment(contact_pts, segment_pc)
         filtered_Ts = np.array(Ts)[filtered_indexes]
         filtered_grasp_scores = np.array(grasp_scores)[filtered_indexes]
-        my_visualize_grasps(segment_pc, filtered_Ts, filtered_grasp_scores)  # debug
+        if DEBUG: my_visualize_grasps(segment_pc, filtered_Ts, filtered_grasp_scores)  # debug
 
         # == 转换到 panda_link0 坐标系下
         if pcd_T is not None:
             filtered_Ts = [pcd_T @ i for i in filtered_Ts]
             segment_pc = (pcd_T @ np.concatenate([segment_pc, np.ones((segment_pc.shape[0], 1))], axis=1).T).T[:, :3]
-            my_visualize_grasps(segment_pc, filtered_Ts, filtered_grasp_scores)  # debug
+            if DEBUG: my_visualize_grasps(segment_pc, filtered_Ts, filtered_grasp_scores)  # debug
 
         # publish_pcd = numpy_to_pointcloud2(object_pcd)
         # rate = rospy.Rate(hz=1)
@@ -370,55 +444,31 @@ class Sampler(object):
 def main():
     rospy.init_node("my_sampler_test_input", anonymous=True)
 
-    sampler = Sampler()
+    camera_info_topic_name = "/camera/color/camera_info"
+    rgb_topic_name = "/camera/color/image_raw"
+    depth_topic_name = "/camera/aligned_depth_to_color/image_raw"
 
-    # # test
-    # image_path = "/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/test_dataset/2_color.png"
-    # depth_path = "/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/test_dataset/2_depth.png"
-    # K = np.array([[908.5330810546875, 0.0, 647.282470703125], [0.0, 909.3223876953125, 354.7244873046875], [0.0, 0.0, 1.0]])
+    sampler = Sampler(
+        camera_info_topic_name=camera_info_topic_name,
+        rgb_topic_name=rgb_topic_name,
+        depth_topic_name=depth_topic_name,
+    )
 
+    # image_path = "/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/test_dataset/graspgpt_2/images/00000001.png"
+    # depth_path = "/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/test_dataset/graspgpt_2/depth/00000001.png"
+    # T_path = "/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/test_dataset/graspgpt_2/cams/00000001_cam.txt"
     # rgb_image = cv2.imread(image_path)
     # depth_image = cv2.imread(depth_path, cv2.IMREAD_ANYDEPTH) / 1000.0
+    # K = np.array([
+    #     601.3460693359375,0.0,316.9475402832031, 
+    #     0.0,601.8807373046875,239.77159118652344,
+    #     0.0,0.0,1.0 
+    # ])
+    # K = K.reshape([3, 3])
+    # matrices = read_matrices_from_txt(T_path)
+    # pcd_T = matrices["extrinsic"]
 
-    # # pcd, _, _ = depth2pc(depth_image, K)
-    # # visualize_point_cloud(pcd)
-
-    # ori_image_width, ori_image_height = rgb_image.shape[1], rgb_image.shape[0]
-    # rgb_image = cv2.resize(rgb_image, (ori_image_width // 2, ori_image_height // 2))
-    # depth_image = cv2.resize(depth_image, (ori_image_width // 2, ori_image_height // 2))
-    # K[0, 0] /= 2.0
-    # K[0, 2] /= 2.0
-    # K[1, 1] /= 2.0
-    # K[1, 2] /= 2.0
-
-    # object_pcd = np.load("/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/test_dataset/124_paint_roller/1_pc.npy")
-    # object_pcd, object_pcd_color = object_pcd[:, :3], object_pcd[:, 3:]
-    # visualize_point_cloud(point_cloud=object_pcd)
-
-    # test 2
-    # image_path = "/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/test_dataset/124_paint_roller/1_color.png"
-    # depth_path = "/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/test_dataset/124_paint_roller/1_depth.npy"
-    # K_path     = "/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/test_dataset/124_paint_roller/1_camerainfo.npy"
-    # rgb_image = cv2.imread(image_path)
-    # depth_image = np.load(depth_path) / 1000.0
-    # K = np.load(K_path)
-
-    # test3
-    image_path = "/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/test_dataset/graspgpt_2/images/00000001.png"
-    depth_path = "/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/test_dataset/graspgpt_2/depth/00000001.png"
-    T_path = "/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/test_dataset/graspgpt_2/cams/00000001_cam.txt"
-    rgb_image = cv2.imread(image_path)
-    depth_image = cv2.imread(depth_path, cv2.IMREAD_ANYDEPTH) / 1000.0
-    K = np.array([
-        601.3460693359375,0.0,316.9475402832031, 
-        0.0,601.8807373046875,239.77159118652344,
-        0.0,0.0,1.0 
-    ])
-    K = K.reshape([3, 3])
-    matrices = read_matrices_from_txt(T_path)
-    pcd_T = matrices["extrinsic"]
-
-    sampler.test_input(rgb_image, depth_image, K, pcd_T=pcd_T)
+    # sampler.test_input(rgb_image, depth_image, K, pcd_T=pcd_T)
     # sampler.test_input_2()
     pass
 
