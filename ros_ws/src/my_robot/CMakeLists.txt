@@ -37,7 +37,7 @@ find_package(catkin REQUIRED COMPONENTS
 add_action_files(
   DIRECTORY actions
   FILES 
-  grasp.action
+  Grasp.action
 )
 
 generate_messages(

@@ -206,8 +206,8 @@ class MyPanda(Panda):
             root_dir / "_pybullet/data/franka_panda/panda_finger.urdf"
         )  # NOQA
         super().__init__(urdf_file=urdf_file)
-        print(self.joint_list)
-        print(self.link_list)
+        # print(self.joint_list)
+        # print(self.link_list)
         pass
 
     @property

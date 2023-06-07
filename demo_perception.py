@@ -17,7 +17,7 @@ from cv_bridge import CvBridge, CvBridgeError
 import std_msgs.msg
 from sensor_msgs.msg import PointCloud2, PointField, CameraInfo, Image
 from geometry_msgs.msg import PoseStamped
-from my_robot.msg import graspAction, graspGoal, graspResult, graspFeedback
+from my_robot.msg import GraspAction, GraspGoal, GraspResult, GraspFeedback
 
 from utils.T_7dof import *
 
@@ -310,6 +310,10 @@ class Sampler(object):
         self.tf_listener = tf.listener.TransformListener()
         self.bridge = CvBridge()
 
+        rospy.loginfo("Waiting grasp interface")
+        self.client = actionlib.SimpleActionClient("/grasp_interface", GraspAction)
+        self.client.wait_for_server()
+
         rospy.loginfo("Waiting camera_info")
         camera_info = rospy.wait_for_message(camera_info_topic_name, CameraInfo)
         self.fx, self.fy, self.cx, self.cy = (
@@ -346,7 +350,24 @@ class Sampler(object):
             ee_to_camera_T = sevenDof2T(ee_to_camera_pose)
             camera_pose_T = np.dot(ee_pose_T, ee_to_camera_T)
             rospy.loginfo("Obtain Pose!")
-            self.test_input(rgb_image, depth_image, self.K, pcd_T=camera_pose_T)
+            grasp_Ts = self.test_input(rgb_image, depth_image, self.K, pcd_T=camera_pose_T)
+
+            # == 发送
+            goal = GraspGoal()
+
+            goal_grasp_T = grasp_Ts[0]
+            sevenDof_pose = T2sevendof(goal_grasp_T)
+            goal.grasp_pose.pose.position.x = sevenDof_pose[0]
+            goal.grasp_pose.pose.position.y = sevenDof_pose[1]
+            goal.grasp_pose.pose.position.z = sevenDof_pose[2]
+            goal.grasp_pose.pose.orientation.x = sevenDof_pose[3]
+            goal.grasp_pose.pose.orientation.y = sevenDof_pose[4]
+            goal.grasp_pose.pose.orientation.z = sevenDof_pose[5]
+            goal.grasp_pose.pose.orientation.w = sevenDof_pose[6]
+            
+            self.client.send_goal(goal)
+            self.client.wait_for_result()
+            result = self.client.get_result()
 
             cv2.destroyAllWindows()
             rospy.loginfo("================Finish!================")
@@ -389,10 +410,6 @@ class Sampler(object):
         self.test_input(rgb_image, depth_image, self.K, camera_pose_T)
         pass
 
-    def sample(self):
-        # TODO: 实际运行时，需要从摄像头获取图像
-        pass
-
     def test_input(self, rgb_image, depth_image, K, pcd_T=None):
         DEBUG = True
 
@@ -402,7 +419,7 @@ class Sampler(object):
         if DEBUG: my_visualize_grasps(object_pcd, Ts, grasp_scores)  # debug
 
         # == prompt point 进行 SAM 物体选择
-        prompt_point = get_click_coordinates(rgb_image)[0]
+        prompt_point = get_click_coordinates(rgb_image)[-1]
         self.predictor.set_image(rgb_image)
         masks, scores, logits = self.predictor.predict(
             point_coords=np.array([prompt_point]),
@@ -428,6 +445,8 @@ class Sampler(object):
             filtered_Ts = [pcd_T @ i for i in filtered_Ts]
             segment_pc = (pcd_T @ np.concatenate([segment_pc, np.ones((segment_pc.shape[0], 1))], axis=1).T).T[:, :3]
             if DEBUG: my_visualize_grasps(segment_pc, filtered_Ts, filtered_grasp_scores)  # debug
+
+        return filtered_Ts
 
         # publish_pcd = numpy_to_pointcloud2(object_pcd)
         # rate = rospy.Rate(hz=1)

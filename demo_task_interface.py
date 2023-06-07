@@ -6,9 +6,13 @@ import pybullet as p
 import pybullet_planning as pp
 
 import rospy
+import actionlib
 from geometry_msgs.msg import PoseStamped
 
+from my_robot.msg import GraspAction, GraspGoal
+
 from base_task_interface import BaseTaskInterface
+from utils.reorient_modules import reorientbot
 import utils.geometry as geometry
 from utils.tf import *
 
@@ -25,20 +29,21 @@ class DemoTaskInterface(BaseTaskInterface):
     def __init__(self, real):
         super().__init__(real)
 
-        output_topic_name = "/grasp_poses"
-        self.grasp_pose_subscriber = rospy.Subscriber(output_topic_name, PoseStamped, self.grasp_callback)
-        self.grasp_poses = []
+        # output_topic_name = "/grasp_poses"
+        # self.grasp_pose_subscriber = rospy.Subscriber(output_topic_name, PoseStamped, self.grasp_callback)
+        # self.grasp_poses = []
+
+        self.server = actionlib.SimpleActionServer(
+            "/grasp_interface", GraspAction, self.grasp_callback, False
+        )
+        self.server.start()
         pass
 
-    # def grasp_call_back(self, pose_msg):
-    #     self.grasp_poses.append(pose_msg)
-    #     pass
+    def grasp_callback(self, grasp_goal):
+        print(grasp_goal)
+        grasp_pose = grasp_goal.grasp_pose
 
-    def grasp_callback(self, pose_msg):
-        # TODO Pose -> Ts
-        print(pose_msg)
-
-        goal_T = pose_msg_to_T(pose_msg.pose)
+        goal_T = pose_msg_to_T(grasp_pose.pose)
         goal_pose = T2pybullet(goal_T)
 
         pp.draw_pose(goal_pose)
