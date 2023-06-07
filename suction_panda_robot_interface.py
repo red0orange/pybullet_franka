@@ -11,7 +11,6 @@ import geometry
 import utils
 import pybullet_utils
 from ompl_planning import PbPlanner
-from my_planning import *
 from suction_gripper import SuctionGripper
 
 import skrobot
@@ -40,10 +39,7 @@ class SuctionPandaRobotInterface:
         self.robot = pybullet_planning.load_pybullet(
             urdf_file, fixed_base=True
         )
-        self.ee_link_name = "tipLink"
-        self.joint_links_name = ["panda_link{}".format(i) for i in range(9)]
         self.ee = pybullet_planning.link_from_name(self.robot, "tipLink")
-        self.joint_links = [pybullet_planning.link_from_name(self.robot, name) for name in self.joint_links_name]
 
         self.gripper = SuctionGripper(
             self.robot,
@@ -69,10 +65,6 @@ class SuctionPandaRobotInterface:
         self.joints = [j[0] for j in joints if j[2] == p.JOINT_REVOLUTE]
 
         self.homej = [0, -np.pi / 4, 0, -np.pi / 2, 0, np.pi / 4, np.pi / 4]
-        with pybullet_planning.WorldSaver():
-            self.setj(self.homej)
-            self.home_pose = self.get_pose("tipLink")
-
         for joint, joint_angle in zip(self.joints, self.homej):
             p.resetJointState(self.robot, joint, joint_angle)
         self.update_robot_model()
@@ -281,54 +273,7 @@ class SuctionPandaRobotInterface:
         )
         return planner.validityChecker.isValid(j)
 
-    def plan(self, pose, obstacles):
-        # 1a. 使用 Ours IntegratedRRTPlanner
-        step_len = 0.1
-        iter_num = 100000
-        failure_max_cnt = 500
-        planner = IntegratedRRTPlanner(self, obstacles, failure_max_cnt, None, iter_num)
-
-        result = planner.plan(self.getj(), pose)
-        if result is None:
-            logger.warning("No solution found")
-            return
-
-        return result
-
-    def planj(self, *args, **kwargs):
-        # return self.ori_planj(*args, **kwargs)
-        return self.my_planj(*args, **kwargs)
-
-    def my_planj(
-        self,
-        j,
-        obstacles=None,
-        min_distances=None,
-        min_distances_start_goal=None,
-        planner_range=0,
-    ):
-        # 1. 选择规划器
-        step_len = 0.01
-        iter_num = 100000
-        goal_sample_rate = 0.5
-        planner = RRTConnectPlanner(self, obstacles, step_len, goal_sample_rate, iter_num)
-
-        if not planner.isValid(self.getj(), self.getj()):
-            logger.warning("Start state is invalid")
-            return
-
-        if not planner.isValid(self.getj(), j):
-            logger.warning("Goal state is invalid")
-            return
-
-        result = planner.plan(self.getj(), j)
-        if result is None:
-            logger.warning("No solution found")
-            return
-
-        return result
-
-    def ori_planj(
+    def planj(
         self,
         j,
         obstacles=None,
@@ -440,12 +385,6 @@ class SuctionPandaRobotInterface:
             joint_list=joint_list,
             # root_link=self.robot_model.root_link,
         )
-
-    def get_whole_pose(self):
-        self.update_robot_model()
-        joint_links_T = [getattr(self.robot_model, name).worldcoords().T() for name in self.joint_links_name]
-        ee_T = getattr(self.robot_model, self.ee_link_name).worldcoords().T()
-        return joint_links_T, ee_T
 
     def get_pose(self, name):
         self.update_robot_model()
