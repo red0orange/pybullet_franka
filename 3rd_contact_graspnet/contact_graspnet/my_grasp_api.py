@@ -55,13 +55,14 @@ class ContactGraspAPI:
         # np.savez('results/predictions.npz', pred_grasps_cam=pred_grasps_cam, scores=scores, contact_pts=contact_pts)
 
         pred_grasps_cam = pred_grasps_cam[-1]
+        contact_pts = contact_pts[-1]
         scores = scores[-1]
         Ts = []
         for i in range(pred_grasps_cam.shape[0]):
             T = pred_grasps_cam[i, ...]
             Ts.append(T)
 
-        return Ts, scores
+        return Ts, scores, contact_pts
 
 
 if __name__ == "__main__":

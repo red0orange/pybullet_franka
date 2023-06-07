@@ -5,26 +5,35 @@
     "version": "0.2.0",
     "configurations": [
         {
-           "name": "Python: Grasp Interface",
+            "name": "Python: Current File",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/grasp_task_interface.py",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Python: Demo Perception",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/demo_perception.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "DISPLAY": ":1",
+                "CUDA_VISIBLE_DEVICES": "1",
+            }
+        },
+        {
+            "name": "Python: Demo Interface",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/demo_task_interface.py",
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
                 "DISPLAY": ":1",
             }
         },
-        {
-            "name": "Python: main",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/main.py",
-            "console": "integratedTerminal",
-            "justMyCode": true,
-            "env": {
-                "DISPLAY": ":1",
-            }
-        }
     ]
 }

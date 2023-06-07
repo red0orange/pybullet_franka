@@ -11,14 +11,67 @@ import rospy
 import rospkg
 import actionlib
 
-from sensor_msgs.msg import PointCloud2, PointField
 import std_msgs.msg
+from sensor_msgs.msg import PointCloud2, PointField
+from geometry_msgs.msg import PoseStamped
+from my_robot.msg import graspAction, graspGoal, graspResult, graspFeedback
 
-from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
-project_root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from utils.T_7dof import *
+
+from segment_anything import SamAutomaticMaskGenerator, sam_model_registry, SamPredictor
+
+project_root_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(project_root_dir, "3rd_contact_graspnet", "contact_graspnet"))
 from my_grasp_api import ContactGraspAPI
 from visualization_utils import my_visualize_grasps
+
+
+def publish_poses(pose_Ts, publisher):
+    # Create a PoseStamped message object
+    pose_msg = PoseStamped()
+    pose_msg.header.frame_id = 'base_link'  # Set the frame ID according to your setup
+
+    # Iterate through the pose_T list and publish each pose
+    for pose_T in pose_Ts:
+        sevenDof = T2sevendof(T=pose_T)
+
+        # Set the position and orientation of the pose
+        pose_msg.pose.position.x = sevenDof[0]
+        pose_msg.pose.position.y = sevenDof[1]
+        pose_msg.pose.position.z = sevenDof[2]
+        pose_msg.pose.orientation.x = sevenDof[3]
+        pose_msg.pose.orientation.y = sevenDof[4]
+        pose_msg.pose.orientation.z = sevenDof[5]
+        pose_msg.pose.orientation.w = sevenDof[6]
+
+        # Publish the pose
+        publisher.publish(pose_msg)
+
+        # Add a delay if needed to control the publishing rate
+        rospy.sleep(0.1)  # Adjust the delay time as per your requirement
+    pass
+
+
+def filter_segment(contact_pts, segment_pc, thres=0.00001):
+    """
+    Filter grasps to obtain contacts on specified point cloud segment
+    
+    :param contact_pts: Nx3 contact points of all grasps in the scene
+    :param segment_pc: Mx3 segmented point cloud of the object of interest
+    :param thres: maximum distance in m of filtered contact points from segmented point cloud
+    :returns: Contact/Grasp indices that lie in the point cloud segment
+    """
+    filtered_grasp_idcs = np.array([],dtype=np.int32)
+    
+    if contact_pts.shape[0] > 0 and segment_pc.shape[0] > 0:
+        try:
+            dists = contact_pts[:,:3].reshape(-1,1,3) - segment_pc.reshape(1,-1,3)           
+            min_dists = np.min(np.linalg.norm(dists,axis=2),axis=1)
+            filtered_grasp_idcs = np.where(min_dists<thres)
+        except:
+            pass
+        
+    return filtered_grasp_idcs
 
 
 def read_matrices_from_txt(filepath):
@@ -161,7 +214,7 @@ def numpy_to_pointcloud2(points_array, frame_id="base_link"):
     return pc2
 
 
-def visualize_point_cloud(point_cloud, pcd_color=None, bbox=None):
+def visualize_point_cloud(point_cloud, pcd_color=None, bbox=None, poses=None):
     # 创建Open3D点云对象
     pcd = o3d.geometry.PointCloud()
     
@@ -180,13 +233,28 @@ def visualize_point_cloud(point_cloud, pcd_color=None, bbox=None):
     
     # 将点云添加到可视化窗口
     vis.add_geometry(pcd)
+    if poses is not None:
+        for pose in poses:
+            # 创建一个单位坐标轴
+            coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.01)
+
+            # 转换位姿为4x4的矩阵
+            pose_matrix = np.eye(4)
+            pose_matrix[:3, :3] = pose[:3, :3]
+            pose_matrix[:3, 3] = pose[:3, 3]
+
+            # 将单位坐标轴应用于位姿矩阵
+            coord_frame.transform(pose_matrix)
+
+            vis.add_geometry(coord_frame)
+
     if bbox is not None:
         bbox.color = (1, 0, 0)
         vis.add_geometry(bbox)
     
     # 设置渲染选项
     render_option = vis.get_render_option()
-    render_option.point_size = 1.5  # 设置点的大小
+    render_option.point_size = 0.01  # 设置点的大小
     
     # 运行可视化窗口
     vis.run()
@@ -225,15 +293,19 @@ def depth2pc(depth, K, rgb=None, mask=None, max_depth=1.0):
 
 class Sampler(object):
     def __init__(self):
+        # == SAM
         # self.sam = sam_model_registry["vit_b"](checkpoint="/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/sam_vit_b_01ec64.pth")
         self.sam = sam_model_registry["vit_h"](checkpoint="/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/sam_vit_h_4b8939.pth")
         self.sam.cuda()
-        self.mask_generator = SamAutomaticMaskGenerator(self.sam)
+        # self.mask_generator = SamAutomaticMaskGenerator(self.sam)
+        self.predictor = SamPredictor(self.sam)
 
+        # == contact-graspnet API
         self.grasp_interface = ContactGraspAPI()
 
-        # # for debug
-        # self.pcd_pub = rospy.Publisher("/pcd", PointCloud2, queue_size=1)
+        # == for debug
+        self.pcd_pub = rospy.Publisher("/debug_object_pcd", PointCloud2, queue_size=1)
+        self.grasp_pose_pub = rospy.Publisher("/debug_grasp_poses", PoseStamped, queue_size=1)
         pass
 
     def sample(self):
@@ -241,47 +313,44 @@ class Sampler(object):
         pass
 
     def test_input(self, rgb_image, depth_image, K, pcd_T=None):
-        # @note Debug: 显示整个点云场景
-        # object_pcd, object_pcd_color, _ = depth2pc(depth_image, K, rgb=rgb_image)
-        # visualize_point_cloud(object_pcd)
+        # == 完整点云进行 Grasp Predict
+        object_pcd, object_pcd_color, xy = depth2pc(depth_image, K, rgb=rgb_image, max_depth=0.5)
+        Ts, grasp_scores, contact_pts = self.grasp_interface.infer(object_pcd)
+        my_visualize_grasps(object_pcd, Ts, grasp_scores)  # debug
 
-        # 测试输入
-        print("generate masks")
-        masks = self.mask_generator.generate(rgb_image)
-        masks = sorted(masks, key=lambda x: x["area"], reverse=True)
-        masks = [i for i in masks if i["area"] > 16000 and i["area"] < 20000]
-        # masks = [i for i in masks if i["area"] > 18000 and i["area"] < 25000]
-        # masks = [i for i in masks if i["area"] > 20000 and i["area"] < 30000]
-        # masks = [i for i in masks if i["area"] > 28000 and i["area"] < 38000]
-        # masks = [i for i in masks if i["area"] > 3000 and i["area"] < 5000]
-        # masks = [i for i in masks if i["area"] > 6000 and i["area"] < 7000]
-        # masks = sorted(masks, key=lambda x: x["bbox"][0] - (rgb_image.shape[1] / 2))
+        # == prompt point 进行 SAM 物体选择
+        prompt_point = get_click_coordinates(rgb_image)[0]
+        self.predictor.set_image(rgb_image)
+        masks, scores, logits = self.predictor.predict(
+            point_coords=np.array([prompt_point]),
+            point_labels=np.array([1]),
+            multimask_output=True,
+        )
+        masks = sorted(masks, key=lambda x: np.sum(x), reverse=True)
+        masks = [i for i in masks if np.sum(i) < 50000]  # @DEBUG 
+        mask = masks[0]
+        cv2.imshow("mask", mask.astype(np.uint8) * 255)  # debug
+        cv2.waitKey(0)
 
-        segm = np.full((len(masks), *rgb_image.shape[:2]), fill_value=-1, dtype=np.uint8)
-        for i, mask in enumerate(iterable=masks):
-            segm[i, ...] = mask["segmentation"]
+        # == 根据 mask 过滤物体的 Grasp
+        segment_pc, _, _ = depth2pc(depth_image, K, mask=mask, rgb=rgb_image)
+        filtered_indexes = filter_segment(contact_pts, segment_pc)
+        filtered_Ts = np.array(Ts)[filtered_indexes]
+        filtered_grasp_scores = np.array(grasp_scores)[filtered_indexes]
+        my_visualize_grasps(segment_pc, filtered_Ts, filtered_grasp_scores)  # debug
 
-        # DEBUG
-        for i in range(len(masks)):
-            print("Area:", masks[i]["area"])
-            # cv2.imshow(f"segm{i}", segm[i].astype(np.uint8) * 255)
-            # cv2.waitKey(0)
-            # plt.imshow(segm[i].astype(np.uint8) * 255)
-            plt.imshow(apply_mask((depth_image * 255.0).astype(np.uint8), segm[i]))
-            plt.show()
-            # plt.imshow(apply_mask(rgb_image, segm[i]))
-            # plt.show()
-
-        object_pcd, object_pcd_color, _ = depth2pc(depth_image, K, mask=segm[0], rgb=rgb_image)
-        # object_pcd, object_pcd_color = filter_point_cloud(object_pcd, object_pcd_color)
+        # == 转换到 panda_link0 坐标系下
         if pcd_T is not None:
-            object_pcd = (pcd_T @ np.concatenate([object_pcd, np.ones([object_pcd.shape[0], 1])], axis=1).T).T[:, :3]
-        # DEBUG
-        visualize_point_cloud(object_pcd)
+            filtered_Ts = [pcd_T @ i for i in filtered_Ts]
+            segment_pc = (pcd_T @ np.concatenate([segment_pc, np.ones((segment_pc.shape[0], 1))], axis=1).T).T[:, :3]
+            my_visualize_grasps(segment_pc, filtered_Ts, filtered_grasp_scores)  # debug
 
-        Ts, scores = self.grasp_interface.infer(object_pcd)
-
-        my_visualize_grasps(object_pcd, Ts, scores, pc_colors=object_pcd_color)
+        # publish_pcd = numpy_to_pointcloud2(object_pcd)
+        # rate = rospy.Rate(hz=1)
+        # while True:
+        #     publish_poses([Ts[0]], self.grasp_pose_pub)
+        #     self.pcd_pub.publish(publish_pcd)
+        #     rate.sleep()
         pass
 
     def test_input_2(self):
