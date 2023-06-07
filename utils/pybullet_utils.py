@@ -11,7 +11,7 @@ import path
 import pybullet as p
 import pybullet_planning as pp
 
-import geometry
+from . import geometry
 
 
 def init_world(*args, **kwargs):

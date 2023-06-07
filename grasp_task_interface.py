@@ -9,7 +9,7 @@ import rospy
 from geometry_msgs.msg import PoseStamped
 
 from base_task_interface import BaseTaskInterface
-import geometry
+import utils.geometry as geometry
 from utils.tf import *
 
 

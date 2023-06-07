@@ -25,11 +25,11 @@ from sensor_msgs.msg import JointState
 from std_srvs.srv import SetBool
 import tf
 
-from modules import reorientbot
-from modules import _env
-from modules._message_subscriber import MessageSubscriber
-from modules._panda import Panda, MyPanda
-from modules._panda_ros_robot_interface import PandaROSRobotInterface
+from utils.reorient_modules import reorientbot
+from utils.reorient_modules import _env
+from utils.reorient_modules._message_subscriber import MessageSubscriber
+from utils.reorient_modules._panda import Panda, MyPanda
+from utils.reorient_modules._panda_ros_robot_interface import PandaROSRobotInterface
 
 
 class BaseTaskInterface:
