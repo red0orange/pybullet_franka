@@ -21,7 +21,7 @@ def pose_msg_to_T(pose_msg):
     return T
 
 
-class GraspTaskInterface(BaseTaskInterface):
+class DemoTaskInterface(BaseTaskInterface):
     def __init__(self, real):
         super().__init__(real)
 
@@ -152,7 +152,7 @@ def main():
     
     # real = False
     real = True
-    task_interface = GraspTaskInterface(real)
+    task_interface = DemoTaskInterface(real)
 
     # time.sleep(2)
     # task_interface.test_real_pick()
