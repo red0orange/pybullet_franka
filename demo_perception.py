@@ -16,7 +16,7 @@ from cv_bridge import CvBridge, CvBridgeError
 
 import std_msgs.msg
 from sensor_msgs.msg import PointCloud2, PointField, CameraInfo, Image
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Pose
 from my_robot.msg import GraspAction, GraspGoal, GraspResult, GraspFeedback
 
 from utils.T_7dof import *
@@ -294,6 +294,19 @@ def depth2pc(depth, K, rgb=None, mask=None, max_depth=1.0):
     return pc, rgb, np.vstack((x,y)).T
 
 
+def T2pose(T):
+    pose_msg = Pose()
+    sevenDof_pose = T2sevendof(T)
+    pose_msg.position.x = sevenDof_pose[0]
+    pose_msg.position.y = sevenDof_pose[1]
+    pose_msg.position.z = sevenDof_pose[2]
+    pose_msg.orientation.x = sevenDof_pose[3]
+    pose_msg.orientation.y = sevenDof_pose[4]
+    pose_msg.orientation.z = sevenDof_pose[5]
+    pose_msg.orientation.w = sevenDof_pose[6]
+    return pose_msg
+
+
 class Sampler(object):
     def __init__(self, rgb_topic_name, depth_topic_name, camera_info_topic_name):
         # == SAM
@@ -356,14 +369,12 @@ class Sampler(object):
             goal = GraspGoal()
 
             goal_grasp_T = grasp_Ts[0]
-            sevenDof_pose = T2sevendof(goal_grasp_T)
-            goal.grasp_pose.pose.position.x = sevenDof_pose[0]
-            goal.grasp_pose.pose.position.y = sevenDof_pose[1]
-            goal.grasp_pose.pose.position.z = sevenDof_pose[2]
-            goal.grasp_pose.pose.orientation.x = sevenDof_pose[3]
-            goal.grasp_pose.pose.orientation.y = sevenDof_pose[4]
-            goal.grasp_pose.pose.orientation.z = sevenDof_pose[5]
-            goal.grasp_pose.pose.orientation.w = sevenDof_pose[6]
+            goal.grasp_pose.pose = T2pose(goal_grasp_T)
+
+            # debug
+            pose_stamp_msgs = [PoseStamped(pose=T2pose(T)) for T in grasp_Ts]
+            for pose_stamp_msg in pose_stamp_msgs:
+                goal.debug_grasp_poses.append(pose_stamp_msg)
             
             self.client.send_goal(goal)
             self.client.wait_for_result()
@@ -416,6 +427,9 @@ class Sampler(object):
         # == 完整点云进行 Grasp Predict
         object_pcd, object_pcd_color, xy = depth2pc(depth_image, K, rgb=rgb_image, max_depth=0.5)
         Ts, grasp_scores, contact_pts = self.grasp_interface.infer(object_pcd)
+        if len(Ts) < 10:
+            rospy.loginfo("No Grasp!")
+            return
         if DEBUG: my_visualize_grasps(object_pcd, Ts, grasp_scores)  # debug
 
         # == prompt point 进行 SAM 物体选择

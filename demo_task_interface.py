@@ -43,12 +43,26 @@ class DemoTaskInterface(BaseTaskInterface):
         print(grasp_goal)
         grasp_pose = grasp_goal.grasp_pose
 
+        # debug
+        grasp_poses = grasp_goal.debug_grasp_poses
+        print(grasp_poses)
+        debug_T = [pose_msg_to_T(pose.pose) for pose in grasp_poses]
+        for i, T in enumerate(debug_T):
+            if i % 3 == 0:
+                pp.draw_pose(T2pybullet(T))
+
+        # debug
+        grasp_pose = sorted(grasp_poses, key=lambda x: x.pose.position.y, reverse=True)[0]
+
         goal_T = pose_msg_to_T(grasp_pose.pose)
         goal_pose = T2pybullet(goal_T)
 
         pp.draw_pose(goal_pose)
 
         # pre grasp
+        c = reorientbot.geometry.Coordinate(goal_pose[0], goal_pose[1])
+        c.translate([0, 0, -0.04], wrt="local")
+        goal_pose = c.pose
         target_j = self._env.pi.solve_ik(
             goal_pose,
             move_target=self._env.pi.robot_model.panda_hand,
