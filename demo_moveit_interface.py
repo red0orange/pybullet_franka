@@ -23,14 +23,17 @@ class DemoMoveitInterface(object):
         rospy.init_node("demo_moveit_interface", anonymous=True)
 
         # init
-        self.robot = moveit_commander.RobotCommander()
-        self.scene = moveit_commander.PlanningSceneInterface()
-        self.move_group = moveit_commander.MoveGroupCommander("panda_arm")
+        robot_description = "/my_gen3/robot_description"
+        ns = "/my_gen3"
+        self.robot = moveit_commander.RobotCommander(robot_description=robot_description, ns=ns)
+        # self.scene = moveit_commander.PlanningSceneInterface()
+        self.arm_move_group = moveit_commander.MoveGroupCommander("arm", robot_description=robot_description, ns=ns)
+        self.gripper_move_group = moveit_commander.MoveGroupCommander("gripper", robot_description=robot_description, ns=ns)
 
         # print franka state
-        planning_frame = self.move_group.get_planning_frame()
+        planning_frame = self.arm_move_group.get_planning_frame()
         print("============ Planning frame: %s" % planning_frame)
-        eef_link = self.move_group.get_end_effector_link()
+        eef_link = self.arm_move_group.get_end_effector_link()
         print("============ End effector link: %s" % eef_link)
         group_names = self.robot.get_group_names()
         print("============ Available Planning Groups:", group_names)
@@ -70,15 +73,15 @@ class DemoMoveitInterface(object):
         return True
 
     def get_cur_pose(self):
-        return self.move_group.get_current_pose().pose
+        return self.arm_move_group.get_current_pose().pose
 
     def move_to_pose_goal(self, pose_goal):
         assert(type(pose_goal) == geometry_msgs.msg.Pose)
 
-        self.move_group.set_pose_target(pose_goal)
-        success = self.move_group.go(wait=True)
-        self.move_group.stop()
-        self.move_group.clear_pose_targets()
+        self.arm_move_group.set_pose_target(pose_goal)
+        success = self.arm_move_group.go(wait=True)
+        self.arm_move_group.stop()
+        self.arm_move_group.clear_pose_targets()
 
         return DemoMoveitInterface.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
 
