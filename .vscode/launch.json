@@ -13,6 +13,16 @@
             "justMyCode": true
         },
         {
+            "name": "Python: Demo MoveIt Interface",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/demo_moveit_interface.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+            }
+        },
+        {
             "name": "Python: Demo Perception",
             "type": "python",
             "request": "launch",
