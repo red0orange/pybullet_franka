@@ -11,6 +11,7 @@ import sensor_msgs.msg
 
 from math import pi, tau, dist, fabs, cos
 from scipy.spatial.transform import Rotation as R
+import cv2
 
 import actionlib
 
@@ -147,6 +148,10 @@ class DemoMoveitInterface(object):
 
         self.arm_move_group.set_pose_target(pose_goal)
         success = self.arm_move_group.go(wait=True)
+
+        cv2.imshow("click to excute", np.zeros((100, 100)))
+        cv2.waitKey(0)
+
         self.arm_move_group.stop()
         self.arm_move_group.clear_pose_targets()
 
