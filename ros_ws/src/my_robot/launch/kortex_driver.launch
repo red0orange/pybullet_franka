@@ -5,7 +5,7 @@
     <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="camera_link_broadcaster"
         args="0.0285166 0.0361366 -0.0144262   0.0108551 0.0126138 0.998982 0.041935 tool_frame fake_camera_frame" /> -->
     <node pkg="tf2_ros" type="static_transform_publisher" name="camera_link_broadcaster"
-        args="0.013940749689936638 0.03756675496697426 -0.013347381725907326      0.537226562287117 0.4725248730729771 0.5168026270404422 -0.47013073656012244 tool_frame camera_link" />
+        args="0.017245570197701454 0.03435368463397026 -0.056315381079912186      0.5095835649852237 0.48912282343365737 0.5030962370281797 -0.497973539514335 tool_frame camera_link" />
     
     <!-- 点云 -->
     <include ns="/my_gen3/move_group" file="$(find sensor_moveit_config)/launch/sensor_manager.launch"/>

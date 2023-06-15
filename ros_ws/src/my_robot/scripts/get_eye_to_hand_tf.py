@@ -25,8 +25,9 @@ if __name__ == "__main__":
         camera_link_to_optical_frame_homo_T)
 
     # Calibration Result
-    (hand_to_optical_frame_position, hand_to_optical_frame_quaternion) = (
-        0.0285166,0.0361366,-0.0144262), (0.0108551,0.0126138,0.998982,0.041935)
+    data = "0.0318925 0.0342034 -0.0573687 0.00927742 0.000113984 0.999956 -0.000995543"
+    list_data = list(map(float, data.split()))
+    (hand_to_optical_frame_position, hand_to_optical_frame_quaternion) = list_data[:3], list_data[3:]
     hand_to_optical_frame_homo_T = np.identity(4, dtype=np.float32)
     hand_to_optical_frame_homo_T[:3, -1] = hand_to_optical_frame_position
     hand_to_optical_frame_homo_T[:3, :3] = T.quaternion_matrix(
