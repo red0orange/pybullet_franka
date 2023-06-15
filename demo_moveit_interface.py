@@ -14,6 +14,9 @@ from math import pi, tau, dist, fabs, cos
 from std_msgs.msg import String
 from moveit_commander.conversions import pose_to_list
 
+from moveit_msgs.msg import PlanningScene, AllowedCollisionMatrix, AllowedCollisionEntry
+from moveit_msgs.srv import GetPlanningScene, ApplyPlanningScene
+
 
 class DemoMoveitInterface(object):
     def __init__(self) -> None:

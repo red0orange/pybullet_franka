@@ -175,12 +175,13 @@ def compute_bounding_box(points, scale):
     return x_min, x_max, y_min, y_max, z_min, z_max
 
 
-def numpy_to_pointcloud2(points_array, frame_id="base_link"):
+def numpy_to_pointcloud2(points_array, rgb=None, frame_id="base_link"):
     """
     Convert a nx3 points array to a sensor_msgs/PointCloud2 message.
 
     Parameters:
     points_array: A nx3 numpy array representing a point cloud.
+    rgb: An optional nx3 numpy array representing the RGB color of each point.
     frame_id: The frame in which the point cloud will be published (default: "base_link").
 
     Returns:
@@ -198,8 +199,14 @@ def numpy_to_pointcloud2(points_array, frame_id="base_link"):
         PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1)
     ]
 
+    if rgb is not None:
+        fields.append(PointField(name='rgb', offset=12, datatype=PointField.UINT8, count=3))
+
     # Convert numpy array to list
     points_list = points_array.flatten().tolist()
+
+    if rgb is not None:
+        points_list += rgb.flatten().tolist()
 
     # Create PointCloud2 message
     pc2 = PointCloud2(
@@ -209,8 +216,8 @@ def numpy_to_pointcloud2(points_array, frame_id="base_link"):
         is_dense=False,
         is_bigendian=False,
         fields=fields,
-        point_step=12,
-        row_step=12 * len(points_array),
+        point_step=12 + (3 if rgb is not None else 0),
+        row_step=(12 + (3 if rgb is not None else 0)) * len(points_array),
         data=np.asarray(points_list, np.float32).tostring()
     )
 
@@ -323,6 +330,12 @@ class Sampler(object):
         self.tf_listener = tf.listener.TransformListener()
         self.bridge = CvBridge()
 
+        # == for debug
+        self.object_pcd2_pub = rospy.Publisher("/object_pcd2", PointCloud2, queue_size=1)
+        self.env_pcd2_pub    = rospy.Publisher("/env_pcd2", PointCloud2, queue_size=1)
+        self.grasp_pose_pub = rospy.Publisher("/debug_grasp_poses", PoseStamped, queue_size=1)
+
+        # == begin
         rospy.loginfo("Waiting grasp interface")
         self.client = actionlib.SimpleActionClient("/grasp_interface", GraspAction)
         self.client.wait_for_server()
@@ -356,14 +369,16 @@ class Sampler(object):
             depth_image = depth_image.astype(np.float32) / 1000.0
             rospy.loginfo("Obtaining Pose!")
             # ee_pose_T = self.get_cur_pose()
-            self.tf_listener.waitForTransform("panda_link0", "panda_hand", rospy.Time(), rospy.Duration(4.0))
-            (trans, quat) = self.tf_listener.lookupTransform("panda_link0", "panda_hand", rospy.Time(0))
+            tool_frame = "tool_frame"
+            base_frame = "base_link"
+            self.tf_listener.waitForTransform(base_frame, tool_frame, rospy.Time(), rospy.Duration(4.0))
+            (trans, quat) = self.tf_listener.lookupTransform(base_frame, tool_frame, rospy.Time(0))
             ee_pose_T = sevenDof2T(list(trans) + list(quat))
-            ee_to_camera_pose = np.array([0.0389764, -0.0298156, 0.0737251, 0.00624646, -0.00743901, 0.714763, 0.699299])
+            ee_to_camera_pose = np.array([0.0285166,0.0361366,-0.0144262,  0.0108551,0.0126138,0.998982,0.041935])
             ee_to_camera_T = sevenDof2T(ee_to_camera_pose)
             camera_pose_T = np.dot(ee_pose_T, ee_to_camera_T)
             rospy.loginfo("Obtain Pose!")
-            grasp_Ts = self.test_input(rgb_image, depth_image, self.K, pcd_T=camera_pose_T)
+            grasp_Ts, object_pc, env_pc = self.test_input(rgb_image, depth_image, self.K, pcd_T=camera_pose_T)
 
             # == 发送
             goal = GraspGoal()
@@ -377,8 +392,20 @@ class Sampler(object):
                 goal.debug_grasp_poses.append(pose_stamp_msg)
             
             self.client.send_goal(goal)
-            self.client.wait_for_result()
-            result = self.client.get_result()
+
+            rate = rospy.Rate(hz=1)
+            while not rospy.is_shutdown():
+                self.object_pcd2_pub.publish(numpy_to_pointcloud2(object_pc, frame_id="base_link"))
+                self.env_pcd2_pub.publish(numpy_to_pointcloud2(env_pc, frame_id="base_link"))
+
+                key = cv2.waitKey(1)
+                if key == ord("q"):
+                    break
+
+                rate.sleep()
+
+            # self.client.wait_for_result()
+            # result = self.client.get_result()
 
             cv2.destroyAllWindows()
             rospy.loginfo("================Finish!================")
@@ -393,9 +420,6 @@ class Sampler(object):
         # self.rgbd_subscriber.registerCallback(self.rgbd_cb)
         # self.flag = True
 
-        # == for debug
-        self.pcd_pub = rospy.Publisher("/debug_object_pcd", PointCloud2, queue_size=1)
-        self.grasp_pose_pub = rospy.Publisher("/debug_grasp_poses", PoseStamped, queue_size=1)
         pass
 
     def rgbd_cb(self, rgb_msg, depth_msg):
@@ -448,6 +472,7 @@ class Sampler(object):
             cv2.waitKey(0)
 
         # == 根据 mask 过滤物体的 Grasp
+        env_pc, _, _ = depth2pc(depth_image, K, mask=np.bitwise_not(mask), rgb=rgb_image)
         segment_pc, _, _ = depth2pc(depth_image, K, mask=mask, rgb=rgb_image)
         filtered_indexes = filter_segment(contact_pts, segment_pc)
         filtered_Ts = np.array(Ts)[filtered_indexes]
@@ -460,7 +485,7 @@ class Sampler(object):
             segment_pc = (pcd_T @ np.concatenate([segment_pc, np.ones((segment_pc.shape[0], 1))], axis=1).T).T[:, :3]
             if DEBUG: my_visualize_grasps(segment_pc, filtered_Ts, filtered_grasp_scores)  # debug
 
-        return filtered_Ts
+        return filtered_Ts, segment_pc, env_pc
 
         # publish_pcd = numpy_to_pointcloud2(object_pcd)
         # rate = rospy.Rate(hz=1)

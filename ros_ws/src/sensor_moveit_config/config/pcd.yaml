@@ -1,7 +1,7 @@
 # /universal_robot/sensor_moveit_config/config/sensor_rgbd.yaml
 sensors:
   - sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
-    point_cloud_topic: /camera/depth/color/points
+    point_cloud_topic: /env_pcd2
     max_range: 10
     padding_offset: 0.01
     padding_scale: 1.0
