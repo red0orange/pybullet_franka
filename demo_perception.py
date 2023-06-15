@@ -29,6 +29,20 @@ from my_grasp_api import ContactGraspAPI
 from visualization_utils import my_visualize_grasps
 
 
+def dilate_mask(mask, kernel_size=5, iterations=1):
+    # Convert to uint8
+    mask_uint8 = (mask.astype(np.uint8) * 255)
+    
+    # Create a kernel
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    
+    # Dilate the mask
+    dilation_uint8 = cv2.dilate(mask_uint8, kernel, iterations=iterations)
+    
+    # Convert back to bool and return
+    return (dilation_uint8 > 0)
+
+
 def publish_poses(pose_Ts, publisher):
     # Create a PoseStamped message object
     pose_msg = PoseStamped()
@@ -374,11 +388,17 @@ class Sampler(object):
             self.tf_listener.waitForTransform(base_frame, tool_frame, rospy.Time(), rospy.Duration(4.0))
             (trans, quat) = self.tf_listener.lookupTransform(base_frame, tool_frame, rospy.Time(0))
             ee_pose_T = sevenDof2T(list(trans) + list(quat))
-            ee_to_camera_pose = np.array([0.0285166,0.0361366,-0.0144262,  0.0108551,0.0126138,0.998982,0.041935])
+
+            data = "0.0318925 0.0342034 -0.0573687 0.00927742 0.000113984 0.999956 -0.000995543"
+            ee_to_camera_pose = np.array(list(map(float, data.split())))
+
             ee_to_camera_T = sevenDof2T(ee_to_camera_pose)
             camera_pose_T = np.dot(ee_pose_T, ee_to_camera_T)
             rospy.loginfo("Obtain Pose!")
-            grasp_Ts, object_pc, env_pc = self.test_input(rgb_image, depth_image, self.K, pcd_T=camera_pose_T)
+            output = self.test_input(rgb_image, depth_image, self.K, pcd_T=camera_pose_T)
+            if output is None:
+                continue
+            grasp_Ts, object_pc, env_pc = output
 
             # == 发送
             goal = GraspGoal()
@@ -393,7 +413,7 @@ class Sampler(object):
             
             self.client.send_goal(goal)
 
-            rate = rospy.Rate(hz=1)
+            rate = rospy.Rate(hz=5)
             while not rospy.is_shutdown():
                 self.object_pcd2_pub.publish(numpy_to_pointcloud2(object_pc, frame_id="base_link"))
                 self.env_pcd2_pub.publish(numpy_to_pointcloud2(env_pc, frame_id="base_link"))
@@ -449,7 +469,7 @@ class Sampler(object):
         DEBUG = True
 
         # == 完整点云进行 Grasp Predict
-        object_pcd, object_pcd_color, xy = depth2pc(depth_image, K, rgb=rgb_image, max_depth=0.5)
+        object_pcd, object_pcd_color, xy = depth2pc(depth_image, K, rgb=rgb_image, max_depth=0.9)
         Ts, grasp_scores, contact_pts = self.grasp_interface.infer(object_pcd)
         if len(Ts) < 10:
             rospy.loginfo("No Grasp!")
@@ -467,12 +487,16 @@ class Sampler(object):
         masks = sorted(masks, key=lambda x: np.sum(x), reverse=True)
         masks = [i for i in masks if np.sum(i) < 50000]  # @DEBUG 
         mask = masks[0]
+        mask = dilate_mask(mask, kernel_size=5, iterations=2)
         if DEBUG: 
             cv2.imshow("mask", mask.astype(np.uint8) * 255)  # debug
-            cv2.waitKey(0)
+            key = cv2.waitKey(0)
+            if key == ord("q"):
+                return None
 
         # == 根据 mask 过滤物体的 Grasp
         env_pc, _, _ = depth2pc(depth_image, K, mask=np.bitwise_not(mask), rgb=rgb_image)
+        env_pc = filter_point_cloud(env_pc, radius=0.01, min_neighbors=50)
         segment_pc, _, _ = depth2pc(depth_image, K, mask=mask, rgb=rgb_image)
         filtered_indexes = filter_segment(contact_pts, segment_pc)
         filtered_Ts = np.array(Ts)[filtered_indexes]
@@ -483,6 +507,7 @@ class Sampler(object):
         if pcd_T is not None:
             filtered_Ts = [pcd_T @ i for i in filtered_Ts]
             segment_pc = (pcd_T @ np.concatenate([segment_pc, np.ones((segment_pc.shape[0], 1))], axis=1).T).T[:, :3]
+            env_pc = (pcd_T @ np.concatenate([env_pc, np.ones((env_pc.shape[0], 1))], axis=1).T).T[:, :3]
             if DEBUG: my_visualize_grasps(segment_pc, filtered_Ts, filtered_grasp_scores)  # debug
 
         return filtered_Ts, segment_pc, env_pc
