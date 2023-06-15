@@ -1,0 +1,6 @@
+<launch>
+  <param name="octomap_resolution" type="double" value="0.025" />
+  <param name="max_range" type="double" value="5.0" />
+
+  <rosparam command = "load" file="$(find sensor_moveit_config)/config/pcd.yaml" />
+</launch>
