@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 from multiprocessing.connection import wait
 import sys
+import time
 import copy
 import re
 import rospy
@@ -34,6 +35,18 @@ def pose_msg_to_T(pose_msg):
     T[:3, 3] = [pose_msg.position.x, pose_msg.position.y, pose_msg.position.z]
     return T
 
+def T_to_pose_msg(T):
+    pose_msg = geometry_msgs.msg.Pose()
+    sevenDof = T2sevendof(T)
+    pose_msg.position.x = sevenDof[0]
+    pose_msg.position.y = sevenDof[1]
+    pose_msg.position.z = sevenDof[2]
+    pose_msg.orientation.x = sevenDof[3]
+    pose_msg.orientation.y = sevenDof[4]
+    pose_msg.orientation.z = sevenDof[5]
+    pose_msg.orientation.w = sevenDof[6]
+    return pose_msg
+
 
 def pose_msg_to_c(pose_msg):
     position = [pose_msg.position.x, pose_msg.position.y, pose_msg.position.z]
@@ -66,6 +79,21 @@ def sort_grasp_poses(grasp_poses):
     grasp_poses.sort(key=lambda pose: compute_z_rotation(pose))
 
 
+# 计算齐次变换矩阵和xy平面的夹角
+def calculate_angle_with_xy_plane(homo_matrix):
+    # 提取旋转矩阵的z轴方向
+    z_axis = homo_matrix[0:3, 2]
+    # 计算和xy平面法向量(0,0,1)的夹角，由于计算的是和Z轴的夹角，所以直接取Z轴的Z分量即可
+    cos_angle = z_axis[2]
+    angle = np.arccos(np.clip(cos_angle, -1, 1)) # 取值范围防止计算错误
+    # 判断z轴方向，若z轴向下则夹角为负
+    if z_axis[2] < 0:
+        angle = -angle
+    # 转换为角度制
+    angle = np.degrees(angle)
+    return angle
+
+
 class DemoMoveitInterface(object):
     def __init__(self) -> None:
         super(DemoMoveitInterface, self).__init__()
@@ -86,6 +114,9 @@ class DemoMoveitInterface(object):
         self.arm_move_group = moveit_commander.MoveGroupCommander("arm", robot_description=robot_description, ns=ns)
         self.gripper_move_group = moveit_commander.MoveGroupCommander("gripper", robot_description=robot_description, ns=ns)
 
+        # collision pub
+        self.collision_pcd_pub = rospy.Publisher("/collision_pcd2", sensor_msgs.msg.PointCloud2, queue_size=1)
+
         # print franka state
         planning_frame = self.arm_move_group.get_planning_frame()
         print("============ Planning frame: %s" % planning_frame)
@@ -99,38 +130,68 @@ class DemoMoveitInterface(object):
         print("============ Printing robot state: {}".format(joint_state))
         pass
 
-    def grasp_callback(self, grasp_goal):
-        # clear planning scene and wait for update
+    @staticmethod
+    def get_planning_scene():
         get_planning_scene_service_name = "/my_gen3/get_planning_scene"
         rospy.wait_for_service(get_planning_scene_service_name, 10.0)
         get_planning_scene = rospy.ServiceProxy(get_planning_scene_service_name, GetPlanningScene)
         request = PlanningSceneComponents()
         original_response = get_planning_scene(request)
         ori_planning_scene = original_response.scene
-        ori_planning_scene.world = PlanningSceneWorld()
+        return ori_planning_scene
 
+    @staticmethod
+    def apply_planning_scene(planning_scene):
         set_planning_scene_service_name = "/my_gen3/apply_planning_scene"
         rospy.wait_for_service(set_planning_scene_service_name, 10.0)
         apply_planning_scene = rospy.ServiceProxy(set_planning_scene_service_name, ApplyPlanningScene)
-        apply_planning_scene(ori_planning_scene)
+        apply_planning_scene(planning_scene)
+        pass
+
+    @staticmethod
+    def translate_pose_msg(pose_msg, translation):
+        c = pose_msg_to_c(pose_msg=pose_msg)
+        c.translate(translation, wrt="local")
+        pose_msg = c_to_pose_msg(c)
+        return pose_msg
+
+    def grasp_callback(self, grasp_goal):
         rospy.loginfo("Waiting env pcd pointcloud")
         rgb_msg = rospy.wait_for_message("/env_pcd2", sensor_msgs.msg.PointCloud2)
 
-        
         # == begin
         grasp_pose = grasp_goal.grasp_pose
+        header = grasp_pose.header
 
         # debug
         grasp_poses = grasp_goal.debug_grasp_poses
-        debug_T = [pose_msg_to_T(pose.pose) for pose in grasp_poses]
+        grasp_Ts     = [pose_msg_to_T(pose.pose) for pose in grasp_poses]
+        angle_z_xy_plane = [abs(calculate_angle_with_xy_plane(T)) for T in grasp_Ts]
+        print(angle_z_xy_plane)
+        grasp_Ts = [grasp_Ts[i] for i in range(len(grasp_Ts)) if angle_z_xy_plane[i] > 120]
+        grasp_Ts = sorted(grasp_Ts, key=lambda x: x[2, 3], reverse=False)
+
+        grasp_T = grasp_Ts[0]
 
         # debug
-        grasp_pose = sorted(grasp_poses, key=lambda x: x.pose.position.y, reverse=True)[len(grasp_poses) // 2]
+        # grasp_pose = sorted(grasp_poses, key=lambda x: x.pose.position.y, reverse=True)[len(grasp_poses) // 2]
+        grasp_pose = T_to_pose_msg(grasp_T)
+        grasp_pose = geometry_msgs.msg.PoseStamped(pose=grasp_pose, header=header)
         # 按照
+
+        # clear planning scene and wait for update
+        ori_planning_scene = self.get_planning_scene()
+        ori_planning_scene.world = PlanningSceneWorld()
+        self.apply_planning_scene(ori_planning_scene)
+        for i in range(10):
+            self.collision_pcd_pub.publish(grasp_goal.full_cloud)
+            time.sleep(0.1)
+        time.sleep(1)
 
         # == moveit pre grasp
         print("moving to pre grasp pose")
-        pose_goal = grasp_pose.pose
+        # pose_goal = grasp_pose.pose
+        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, -0.02])
         print(pose_goal)
         assert(type(pose_goal) == geometry_msgs.msg.Pose)
         self.arm_move_group.set_pose_target(pose_goal)
@@ -138,11 +199,18 @@ class DemoMoveitInterface(object):
         self.arm_move_group.stop()
         self.arm_move_group.clear_pose_targets()
 
+        # clear planning scene and wait for update
+        ori_planning_scene = self.get_planning_scene()
+        ori_planning_scene.world = PlanningSceneWorld()
+        self.apply_planning_scene(ori_planning_scene)
+        for i in range(10):
+            self.collision_pcd_pub.publish(grasp_goal.env_cloud)
+            time.sleep(0.1)
+        time.sleep(1)
+
         # == moveit grasp
         print("moving to grasp pose")
-        c = pose_msg_to_c(pose_msg=grasp_pose.pose)
-        c.translate([0, 0, 0.08], wrt="local")
-        pose_goal = c_to_pose_msg(c)
+        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.10])
         print(pose_goal)
         assert(type(pose_goal) == geometry_msgs.msg.Pose)
         self.arm_move_group.set_pose_target(pose_goal)

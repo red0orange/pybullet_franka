@@ -1,5 +1,7 @@
-# goal
 geometry_msgs/PoseStamped grasp_pose
+sensor_msgs/PointCloud2 full_cloud
+sensor_msgs/PointCloud2 obj_cloud
+sensor_msgs/PointCloud2 env_cloud
 
 # debug
 geometry_msgs/PoseStamped[] debug_grasp_poses
