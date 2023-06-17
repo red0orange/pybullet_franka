@@ -21,6 +21,8 @@ from moveit_commander.conversions import pose_to_list
 
 from moveit_msgs.msg import PlanningScene, PlanningSceneWorld, PlanningSceneComponents
 from moveit_msgs.srv import GetPlanningScene, ApplyPlanningScene
+from kortex_driver.srv import *
+from kortex_driver.msg import *
 
 from my_robot.msg import GraspAction
 
@@ -113,6 +115,9 @@ class DemoMoveitInterface(object):
         # self.scene = moveit_commander.PlanningSceneInterface()
         self.arm_move_group = moveit_commander.MoveGroupCommander("arm", robot_description=robot_description, ns=ns)
         self.gripper_move_group = moveit_commander.MoveGroupCommander("gripper", robot_description=robot_description, ns=ns)
+        send_gripper_command_full_name = ns + '/base/send_gripper_command'
+        rospy.wait_for_service(send_gripper_command_full_name)
+        self.send_gripper_command = rospy.ServiceProxy(send_gripper_command_full_name, SendGripperCommand)
 
         # collision pub
         self.collision_pcd_pub = rospy.Publisher("/collision_pcd2", sensor_msgs.msg.PointCloud2, queue_size=1)
@@ -149,11 +154,33 @@ class DemoMoveitInterface(object):
         pass
 
     @staticmethod
-    def translate_pose_msg(pose_msg, translation):
+    def translate_pose_msg(pose_msg, translation, wrt="local"):
         c = pose_msg_to_c(pose_msg=pose_msg)
-        c.translate(translation, wrt="local")
+        c.translate(translation, wrt=wrt)
         pose_msg = c_to_pose_msg(c)
         return pose_msg
+
+    def example_send_gripper_command(self, value):
+        # Initialize the request
+        # Close the gripper
+        req = SendGripperCommandRequest()
+        finger = Finger()
+        finger.finger_identifier = 0
+        finger.value = value
+        req.input.gripper.finger.append(finger)
+        req.input.mode = GripperMode.GRIPPER_POSITION
+
+        rospy.loginfo("Sending the gripper command...")
+
+        # Call the service 
+        try:
+            self.send_gripper_command(req)
+        except rospy.ServiceException:
+            rospy.logerr("Failed to call SendGripperCommand")
+            return False
+        else:
+            time.sleep(2)
+            return True
 
     def grasp_callback(self, grasp_goal):
         rospy.loginfo("Waiting env pcd pointcloud")
@@ -191,7 +218,7 @@ class DemoMoveitInterface(object):
         # == moveit pre grasp
         print("moving to pre grasp pose")
         # pose_goal = grasp_pose.pose
-        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, -0.02])
+        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, -0.03])
         print(pose_goal)
         assert(type(pose_goal) == geometry_msgs.msg.Pose)
         self.arm_move_group.set_pose_target(pose_goal)
@@ -210,7 +237,7 @@ class DemoMoveitInterface(object):
 
         # == moveit grasp
         print("moving to grasp pose")
-        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.10])
+        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.11])
         print(pose_goal)
         assert(type(pose_goal) == geometry_msgs.msg.Pose)
         self.arm_move_group.set_pose_target(pose_goal)
@@ -218,6 +245,19 @@ class DemoMoveitInterface(object):
         self.arm_move_group.stop()
         self.arm_move_group.clear_pose_targets()
 
+        # == moveit pose grasp
+        print("grasp")
+        self.example_send_gripper_command(value=0.9)
+
+        # == moveit pose grasp
+        print("moving to grasp pose")
+        pose_goal = self.translate_pose_msg(pose_goal, [0, 0, 0.15], wrt="world")
+        print(pose_goal)
+        assert(type(pose_goal) == geometry_msgs.msg.Pose)
+        self.arm_move_group.set_pose_target(pose_goal)
+        success = self.arm_move_group.go(wait=True)
+        self.arm_move_group.stop()
+        self.arm_move_group.clear_pose_targets()
         pass
 
     def verify_pose(goal, actual, tolerance):
