@@ -398,14 +398,10 @@ class Sampler(object):
             output = self.test_input(rgb_image, depth_image, self.K, pcd_T=camera_pose_T)
             if output is None:
                 continue
-            grasp_Ts, object_pc, env_pc, full_pc = output
+            grasp_Ts, object_pc, env_pc = output
 
             # == 发送
             goal = GraspGoal()
-
-            goal.full_cloud = numpy_to_pointcloud2(full_pc, frame_id="base_link")
-            goal.env_cloud = numpy_to_pointcloud2(env_pc, frame_id="base_link")
-            goal.obj_cloud = numpy_to_pointcloud2(object_pc, frame_id="base_link")
 
             goal_grasp_T = grasp_Ts[0]
             goal.grasp_pose.pose = T2pose(goal_grasp_T)
@@ -473,12 +469,12 @@ class Sampler(object):
         DEBUG = True
 
         # == 完整点云进行 Grasp Predict
-        full_pcd, object_pcd_color, xy = depth2pc(depth_image, K, rgb=rgb_image, max_depth=0.9)
-        Ts, grasp_scores, contact_pts = self.grasp_interface.infer(full_pcd)
+        object_pcd, object_pcd_color, xy = depth2pc(depth_image, K, rgb=rgb_image, max_depth=0.9)
+        Ts, grasp_scores, contact_pts = self.grasp_interface.infer(object_pcd)
         if len(Ts) < 10:
             rospy.loginfo("No Grasp!")
             return
-        if DEBUG: my_visualize_grasps(full_pcd, Ts, grasp_scores)  # debug
+        if DEBUG: my_visualize_grasps(object_pcd, Ts, grasp_scores)  # debug
 
         # == prompt point 进行 SAM 物体选择
         prompt_point = get_click_coordinates(rgb_image)[-1]
@@ -512,10 +508,9 @@ class Sampler(object):
             filtered_Ts = [pcd_T @ i for i in filtered_Ts]
             segment_pc = (pcd_T @ np.concatenate([segment_pc, np.ones((segment_pc.shape[0], 1))], axis=1).T).T[:, :3]
             env_pc = (pcd_T @ np.concatenate([env_pc, np.ones((env_pc.shape[0], 1))], axis=1).T).T[:, :3]
-            full_pcd = (pcd_T @ np.concatenate([full_pcd, np.ones((full_pcd.shape[0], 1))], axis=1).T).T[:, :3]
             if DEBUG: my_visualize_grasps(segment_pc, filtered_Ts, filtered_grasp_scores)  # debug
 
-        return filtered_Ts, segment_pc, env_pc, full_pcd
+        return filtered_Ts, segment_pc, env_pc
 
         # publish_pcd = numpy_to_pointcloud2(object_pcd)
         # rate = rospy.Rate(hz=1)
