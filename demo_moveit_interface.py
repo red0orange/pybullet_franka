@@ -84,16 +84,19 @@ def sort_grasp_poses(grasp_poses):
 # 计算齐次变换矩阵和xy平面的夹角
 def calculate_angle_with_xy_plane(homo_matrix):
     # 提取旋转矩阵的z轴方向
-    z_axis = homo_matrix[0:3, 2]
-    # 计算和xy平面法向量(0,0,1)的夹角，由于计算的是和Z轴的夹角，所以直接取Z轴的Z分量即可
-    cos_angle = z_axis[2]
-    angle = np.arccos(np.clip(cos_angle, -1, 1)) # 取值范围防止计算错误
-    # 判断z轴方向，若z轴向下则夹角为负
-    if z_axis[2] < 0:
-        angle = -angle
-    # 转换为角度制
-    angle = np.degrees(angle)
-    return angle
+    z_axis_vector = homo_matrix[0:3, 2]
+
+    # 计算该向量与 XY 平面法向量的夹角
+    xy_plane_normal = np.array([0, 0, 1])
+    dot_product = np.dot(xy_plane_normal, z_axis_vector)
+
+    # 使用点积公式计算夹角
+    angle = np.arccos(dot_product / (np.linalg.norm(xy_plane_normal) * np.linalg.norm(z_axis_vector)))
+
+    # 将弧度转换为度数，如果你需要的话
+    angle_degrees = np.degrees(angle)
+
+    return angle_degrees
 
 
 class DemoMoveitInterface(object):
@@ -133,6 +136,21 @@ class DemoMoveitInterface(object):
         joint_state = "\n".join(re.findall(
             "position" + '.*', str(robot_cur_state)))
         print("============ Printing robot state: {}".format(joint_state))
+
+        self.back_to_home_state()
+        pass
+
+    def get_cur_pose(self):
+        return self.arm_move_group.get_current_pose().pose
+
+    def back_to_home_state(self):
+        # gripper
+        self.example_send_gripper_command(value=0.2)
+
+        # home pose
+        # home_joint_goal = [0.03153623608649902, -0.9909734268950627, -3.017123961090542, -2.1596175153858903, -0.06072380127933297, -1.2676343188412904, 1.69711937836117]
+        home_joint_goal = [-0.006377738178521497, -0.555639266673043, 3.1360338374464707, -2.163956071117738, -0.014774685095541251, -1.0588206514581397, 1.564804081184164]
+        self.arm_move_group.go(home_joint_goal, wait=True)
         pass
 
     @staticmethod
@@ -183,8 +201,8 @@ class DemoMoveitInterface(object):
             return True
 
     def grasp_callback(self, grasp_goal):
-        rospy.loginfo("Waiting env pcd pointcloud")
-        rgb_msg = rospy.wait_for_message("/env_pcd2", sensor_msgs.msg.PointCloud2)
+        # == moveit pose grasp
+        # self.back_to_home_state()
 
         # == begin
         grasp_pose = grasp_goal.grasp_pose
@@ -193,18 +211,38 @@ class DemoMoveitInterface(object):
         # debug
         grasp_poses = grasp_goal.debug_grasp_poses
         grasp_Ts     = [pose_msg_to_T(pose.pose) for pose in grasp_poses]
-        angle_z_xy_plane = [abs(calculate_angle_with_xy_plane(T)) for T in grasp_Ts]
+        angle_z_xy_plane = [calculate_angle_with_xy_plane(T) for T in grasp_Ts]
         print(angle_z_xy_plane)
-        grasp_Ts = [grasp_Ts[i] for i in range(len(grasp_Ts)) if angle_z_xy_plane[i] > 120]
-        grasp_Ts = sorted(grasp_Ts, key=lambda x: x[2, 3], reverse=False)
 
-        grasp_T = grasp_Ts[0]
+        def get_hard_T(grasp_Ts):
+            hard_grasp_Ts = [grasp_Ts[i] for i in range(len(grasp_Ts)) if angle_z_xy_plane[i] < 100]
+            hard_grasp_Ts = sorted(hard_grasp_Ts, key=lambda x: x[2, 3], reverse=True)
 
-        # debug
-        # grasp_pose = sorted(grasp_poses, key=lambda x: x.pose.position.y, reverse=True)[len(grasp_poses) // 2]
-        grasp_pose = T_to_pose_msg(grasp_T)
-        grasp_pose = geometry_msgs.msg.PoseStamped(pose=grasp_pose, header=header)
-        # 按照
+            if len(hard_grasp_Ts) == 0:
+                return None
+
+            grasp_T = hard_grasp_Ts[0]
+            return grasp_T
+
+        def get_simple_T(grasp_Ts):
+            simple_grasp_Ts = [grasp_Ts[i] for i in range(len(grasp_Ts)) if angle_z_xy_plane[i] > 120]
+            simple_grasp_Ts = sorted(simple_grasp_Ts, key=lambda x: x[2, 3], reverse=True)
+
+            if len(simple_grasp_Ts) == 0:
+                return None
+
+            grasp_T = simple_grasp_Ts[0]
+            return grasp_T
+
+        hard_grasp_T = get_hard_T(grasp_Ts)
+        simple_grasp_T = get_simple_T(grasp_Ts)
+
+        if hard_grasp_T is None:
+            print("hard grasp T is None")
+            hard_grasp_T = simple_grasp_T
+            if simple_grasp_T is None:
+                print("simple grasp T is None")
+                return
 
         # clear planning scene and wait for update
         ori_planning_scene = self.get_planning_scene()
@@ -213,53 +251,117 @@ class DemoMoveitInterface(object):
         for i in range(10):
             self.collision_pcd_pub.publish(grasp_goal.full_cloud)
             time.sleep(0.1)
+            # cur_planning_scene = self.get_planning_scene()
+            # if len(cur_planning_scene.world.collision_objects) != 0:
+            #     break
         time.sleep(1)
 
         # == moveit pre grasp
         print("moving to pre grasp pose")
         # pose_goal = grasp_pose.pose
+        grasp_pose = T_to_pose_msg(hard_grasp_T)
+        grasp_pose = geometry_msgs.msg.PoseStamped(pose=grasp_pose, header=header)
         pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, -0.03])
-        print(pose_goal)
+        # print(pose_goal)
         assert(type(pose_goal) == geometry_msgs.msg.Pose)
         self.arm_move_group.set_pose_target(pose_goal)
         success = self.arm_move_group.go(wait=True)
         self.arm_move_group.stop()
         self.arm_move_group.clear_pose_targets()
+        verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
+        if not verify_reach:
+            print("pre grasp pose not reached")
+
+            # try simple again
+            print("moving to pre grasp pose")
+            # pose_goal = grasp_pose.pose
+            grasp_pose = T_to_pose_msg(simple_grasp_T)
+            grasp_pose = geometry_msgs.msg.PoseStamped(pose=grasp_pose, header=header)
+            pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, -0.03])
+            # print(pose_goal)
+            assert(type(pose_goal) == geometry_msgs.msg.Pose)
+            self.arm_move_group.set_pose_target(pose_goal)
+            success = self.arm_move_group.go(wait=True)
+            self.arm_move_group.stop()
+            self.arm_move_group.clear_pose_targets()
+
+            verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
+            if not verify_reach:
+                print("pre grasp pose not reached")
+
+                self.back_to_home_state()
+                return
+
 
         # clear planning scene and wait for update
         ori_planning_scene = self.get_planning_scene()
         ori_planning_scene.world = PlanningSceneWorld()
         self.apply_planning_scene(ori_planning_scene)
         for i in range(10):
+        # while True:
             self.collision_pcd_pub.publish(grasp_goal.env_cloud)
             time.sleep(0.1)
+            # cur_planning_scene = self.get_planning_scene()
+            # if len(cur_planning_scene.world.collision_objects) != 0:
+            #     break
         time.sleep(1)
 
         # == moveit grasp
         print("moving to grasp pose")
-        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.11])
-        print(pose_goal)
-        assert(type(pose_goal) == geometry_msgs.msg.Pose)
-        self.arm_move_group.set_pose_target(pose_goal)
-        success = self.arm_move_group.go(wait=True)
+        # pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.108])
+
+        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.108])
+        waypoints = [pose_goal]
+        (plan, fraction) = self.arm_move_group.compute_cartesian_path(
+            waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
+        )
+        success = self.arm_move_group.execute(plan, wait=True)
         self.arm_move_group.stop()
         self.arm_move_group.clear_pose_targets()
+        # print(pose_goal)
+        # assert(type(pose_goal) == geometry_msgs.msg.Pose)
+        # self.arm_move_group.set_pose_target(pose_goal)
+        # success = self.arm_move_group.go(wait=True)
+        # self.arm_move_group.stop()
+        # self.arm_move_group.clear_pose_targets()
+
+        verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.03)
+        if not verify_reach:
+            print("grasp pose not reached")
+            self.back_to_home_state()
+            return
 
         # == moveit pose grasp
         print("grasp")
-        self.example_send_gripper_command(value=0.9)
+        self.example_send_gripper_command(value=1.0)
 
         # == moveit pose grasp
         print("moving to grasp pose")
-        pose_goal = self.translate_pose_msg(pose_goal, [0, 0, 0.15], wrt="world")
+        pose_goal = self.translate_pose_msg(pose_goal, [0, 0, 0.22], wrt="world")
         print(pose_goal)
         assert(type(pose_goal) == geometry_msgs.msg.Pose)
         self.arm_move_group.set_pose_target(pose_goal)
         success = self.arm_move_group.go(wait=True)
         self.arm_move_group.stop()
         self.arm_move_group.clear_pose_targets()
+
+        verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
+        if not verify_reach:
+            print("grasp pose not reached")
+            self.back_to_home_state()
+            return
+
+        # == 
+        time.sleep(1.5)
+        print("gripper release")
+        self.example_send_gripper_command(value=0.2)
+
+        # == 
+        time.sleep(0.5)
+        self.back_to_home_state()
         pass
 
+    @staticmethod
     def verify_pose(goal, actual, tolerance):
         """
         Convenience method for testing if the values in two lists are within a tolerance of each other.
