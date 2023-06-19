@@ -470,7 +470,8 @@ class Sampler(object):
         pass
 
     def test_input(self, rgb_image, depth_image, K, pcd_T=None):
-        DEBUG = True
+        # DEBUG = True
+        DEBUG = False
 
         # == 完整点云进行 Grasp Predict
         full_pcd, object_pcd_color, xy = depth2pc(depth_image, K, rgb=rgb_image, max_depth=0.9)
@@ -505,6 +506,7 @@ class Sampler(object):
         filtered_indexes = filter_segment(contact_pts, segment_pc)
         filtered_Ts = np.array(Ts)[filtered_indexes]
         filtered_grasp_scores = np.array(grasp_scores)[filtered_indexes]
+        # filtered_Ts = filtered_Ts[filtered_grasp_scores > 0.2]
         if DEBUG: my_visualize_grasps(segment_pc, filtered_Ts, filtered_grasp_scores)  # debug
 
         # == 转换到 panda_link0 坐标系下
