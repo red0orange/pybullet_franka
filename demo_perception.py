@@ -368,6 +368,16 @@ class Sampler(object):
 
         # == 主动进入一次采样
         while True:
+            save_data_dict = {
+                "K": None,
+                "image": None,
+                "depth": None,
+                "world_pc": None,
+                "world_pc_color": None,
+                "world_grasps": None,
+                "camera_pose": None,
+            }
+
             rospy.loginfo("================Click to one sample!================")
             cv2.namedWindow("click to one sample", cv2.WINDOW_NORMAL)
             cv2.imshow("click to one sample", np.zeros([100, 100]))
@@ -399,6 +409,29 @@ class Sampler(object):
             if output is None:
                 continue
             grasp_Ts, object_pc, env_pc, full_pc = output
+            object_pc, object_pc_color = object_pc[:, :3], object_pc[:, 3:]
+
+            save_data_dict["K"] = self.K
+            save_data_dict["image"] = rgb_image
+            save_data_dict["depth"] = (depth_image * 1000.0).astype(np.uint16)
+            save_data_dict["world_pc"] = object_pc
+            save_data_dict["world_pc_color"] = object_pc_color
+            save_data_dict["world_grasps"] = grasp_Ts
+            save_data_dict["camera_pose"] = camera_pose_T
+
+            save_dir = "/home/huangdehao/github_projects/pybullet_franka/dataset/test"
+            os.makedirs(save_dir, exist_ok=True)
+            np.save(os.path.join(save_dir, "ori_data.npy"), save_data_dict)
+            np.save(os.path.join(save_dir, "fused_pc_clean.npy"), np.concatenate([save_data_dict["world_pc"], save_data_dict["world_pc_color"]], axis=1))
+            np.save(os.path.join(save_dir, "fused_grasps_clean.npy"), save_data_dict["world_grasps"])
+            np.save(os.path.join(save_dir, "fused_pc.npy"), np.concatenate([save_data_dict["world_pc"], save_data_dict["world_pc_color"]], axis=1))
+            np.save(os.path.join(save_dir, "fused_grasps.npy"), save_data_dict["world_grasps"])
+
+            cv2.imwrite(os.path.join(save_dir, "0_color.png"), save_data_dict["image"])
+            np.save(os.path.join(save_dir, "0_color.npy"), save_data_dict["image"])
+            np.save(os.path.join(save_dir, "0_depth.npy"), save_data_dict["depth"])
+            np.save(os.path.join(save_dir, "0_camera_info.npy"), save_data_dict["camera_pose"])
+            np.save(os.path.join(save_dir, "0_camera_pose.npy"), save_data_dict["camera_pose"])
 
             # == 发送
             goal = GraspGoal()
@@ -502,7 +535,7 @@ class Sampler(object):
         # == 根据 mask 过滤物体的 Grasp
         env_pc, _, _ = depth2pc(depth_image, K, mask=np.bitwise_not(mask), rgb=rgb_image)
         env_pc = filter_point_cloud(env_pc, radius=0.01, min_neighbors=50)
-        segment_pc, _, _ = depth2pc(depth_image, K, mask=mask, rgb=rgb_image)
+        segment_pc, segment_pc_color, _ = depth2pc(depth_image, K, mask=mask, rgb=rgb_image)
         filtered_indexes = filter_segment(contact_pts, segment_pc)
         filtered_Ts = np.array(Ts)[filtered_indexes]
         filtered_grasp_scores = np.array(grasp_scores)[filtered_indexes]
@@ -517,6 +550,7 @@ class Sampler(object):
             full_pcd = (pcd_T @ np.concatenate([full_pcd, np.ones((full_pcd.shape[0], 1))], axis=1).T).T[:, :3]
             if DEBUG: my_visualize_grasps(segment_pc, filtered_Ts, filtered_grasp_scores)  # debug
 
+        segment_pc = np.concatenate([segment_pc, segment_pc_color], axis=1)
         return filtered_Ts, segment_pc, env_pc, full_pcd
 
         # publish_pcd = numpy_to_pointcloud2(object_pcd)
