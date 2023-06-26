@@ -310,14 +310,15 @@ class DemoMoveitInterface(object):
         print("moving to grasp pose")
         # pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.108])
 
-        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.108])
+        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.100])
         waypoints = [pose_goal]
         (plan, fraction) = self.arm_move_group.compute_cartesian_path(
             waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
         )
         success = self.arm_move_group.execute(plan, wait=True)
-        self.arm_move_group.stop()
-        self.arm_move_group.clear_pose_targets()
+        # self.arm_move_group.stop()
+        # self.arm_move_group.clear_pose_targets()
+
         # print(pose_goal)
         # assert(type(pose_goal) == geometry_msgs.msg.Pose)
         # self.arm_move_group.set_pose_target(pose_goal)
@@ -325,11 +326,11 @@ class DemoMoveitInterface(object):
         # self.arm_move_group.stop()
         # self.arm_move_group.clear_pose_targets()
 
-        verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.03)
-        if not verify_reach:
-            print("grasp pose not reached")
-            self.back_to_home_state()
-            return
+        # verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.03)
+        # if not verify_reach:
+        #     print("grasp pose not reached")
+        #     self.back_to_home_state()
+        #     return
 
         # == moveit pose grasp
         print("grasp")
@@ -337,13 +338,24 @@ class DemoMoveitInterface(object):
 
         # == moveit pose grasp
         print("moving to grasp pose")
-        pose_goal = self.translate_pose_msg(pose_goal, [0, 0, 0.22], wrt="world")
-        print(pose_goal)
-        assert(type(pose_goal) == geometry_msgs.msg.Pose)
-        self.arm_move_group.set_pose_target(pose_goal)
-        success = self.arm_move_group.go(wait=True)
-        self.arm_move_group.stop()
-        self.arm_move_group.clear_pose_targets()
+        pose_goal = self.get_cur_pose()
+        pose_goal.position.z += 0.2
+        # pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.108])
+        waypoints = [pose_goal]
+        (plan, fraction) = self.arm_move_group.compute_cartesian_path(
+            waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
+        )
+        success = self.arm_move_group.execute(plan, wait=True)
+        # self.arm_move_group.stop()
+        # self.arm_move_group.clear_pose_targets()
+
+        # pose_goal = self.translate_pose_msg(pose_goal, [0, 0, 0.22], wrt="world")
+        # print(pose_goal)
+        # assert(type(pose_goal) == geometry_msgs.msg.Pose)
+        # self.arm_move_group.set_pose_target(pose_goal)
+        # success = self.arm_move_group.go(wait=True)
+        # self.arm_move_group.stop()
+        # self.arm_move_group.clear_pose_targets()
 
         verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
         if not verify_reach:
