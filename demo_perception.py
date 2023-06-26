@@ -433,6 +433,9 @@ class Sampler(object):
             np.save(os.path.join(save_dir, "0_camera_info.npy"), save_data_dict["camera_pose"])
             np.save(os.path.join(save_dir, "0_camera_pose.npy"), save_data_dict["camera_pose"])
 
+            # == TODO 测试阶段，不操作
+            continue
+
             # == 发送
             goal = GraspGoal()
 
@@ -503,8 +506,8 @@ class Sampler(object):
         pass
 
     def test_input(self, rgb_image, depth_image, K, pcd_T=None):
-        # DEBUG = True
-        DEBUG = False
+        DEBUG = True
+        # DEBUG = False
 
         # == 完整点云进行 Grasp Predict
         full_pcd, object_pcd_color, xy = depth2pc(depth_image, K, rgb=rgb_image, max_depth=0.9)
