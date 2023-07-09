@@ -430,9 +430,9 @@ class Sampler(object):
             object_pc, object_pc_color = object_pc[:, :3], object_pc[:, 3:]
 
             object_pc, object_pc_color = filter_point_cloud(object_pc, colors=object_pc_color, min_neighbors=40, radius=0.01)
-            height = 0.15
-            object_pc_color = np.array([object_pc_color[i] for i in range(len(object_pc)) if object_pc[i][2] > height])
-            object_pc = np.array([p for p in object_pc if p[2] > height])
+            # height = 0.15
+            # object_pc_color = np.array([object_pc_color[i] for i in range(len(object_pc)) if object_pc[i][2] > height])
+            # object_pc = np.array([p for p in object_pc if p[2] > height])
 
             save_data_dict["K"] = self.K
             save_data_dict["image"] = rgb_image
@@ -458,10 +458,71 @@ class Sampler(object):
             np.save(os.path.join(save_dir, "0_camera_pose.npy"), save_data_dict["camera_pose"])
 
             # # == TODO 测试阶段，不操作
-            task = "pour"
-            obj_class = "saucepan.n.01"
             obj_name = "test"
+
+            # # 1.
+            # task = "pour"
+            # obj_class = "saucepan.n.01"
+
+            # # 2.
+            # task = "saute"
+            # obj_class = "saucepot.n.01"
+
+            # # 3.
+            # task = "pour"
+            # obj_class = "mug.n.01"
+
+            # # 4.
+            # task = "handover"
+            # obj_class = "cup.n.01"
+
+            # # 5.
+            # task = "screw"
+            # obj_class = "screwdriver.n.01"
+
+            # # 5.
+            # task = "scoop"
+            # obj_class = "wooden_spoon.n.01"
+
+            # # 6.
+            # task = "brush"
+            # obj_class = "brush.n.01"
+
+            # # 7.
+            # task = "spray"
+            # obj_class = "bottle.n.01"
+
+            # # 8.
+            # task = "flip"
+            # obj_class = "spatula.n.01"
+
+            # # 9.
+            # task = "scoop"
+            # obj_class = "ladle.n.01"
+
+            # # 10.
+            # task = "handover"
+            # obj_class = "knife.n.01"
+
+            # # 11.
+            # task = "pour"
+            # obj_class = "mug.n.01"
+
+            # # 12.
+            # task = "brush"
+            # obj_class = "bottlebrush.n.01"
+
+            # 13.
+            task = "pound"
+            obj_class = "hammer.n.01"
+
             best_grasps, best_grasp, topk_inds = self.graspgpt_api.infer(task=task, obj_class=obj_class, obj_name=obj_name)
+
+            cv2.namedWindow("exit to one sample", cv2.WINDOW_NORMAL)
+            cv2.imshow("exit to one sample", np.zeros([100, 100]))
+            key = cv2.waitKey(0)
+            if key == ord("q"):
+                continue
 
             # goal_grasp_T = grasps[0]
             goal_grasp_T = best_grasp
@@ -567,13 +628,26 @@ class Sampler(object):
         )
         masks = sorted(masks, key=lambda x: np.sum(x), reverse=True)
         masks = [i for i in masks if np.sum(i) < 50000]  # @DEBUG 
+
+        # Select default
         mask = masks[0]
         mask = dilate_mask(mask, kernel_size=5, iterations=2)
-        if DEBUG: 
-            cv2.imshow("mask", mask.astype(np.uint8) * 255)  # debug
+        # # if DEBUG: 
+        # if True:
+        #     cv2.imshow("mask", mask.astype(np.uint8) * 255)  # debug
+        #     key = cv2.waitKey(0)
+        #     if key == ord("q"):
+        #         return None
+
+        # 手动选择点云
+        for test_mask in masks:
+            cv2.imshow("test_mask", test_mask.astype(np.uint8) * 255)  # debug
             key = cv2.waitKey(0)
             if key == ord("q"):
-                return None
+                continue
+            else:
+                mask = test_mask
+                break
 
         # == 根据 mask 过滤物体的 Grasp
         env_pc, _, _ = depth2pc(depth_image, K, mask=np.bitwise_not(mask), rgb=rgb_image)
