@@ -149,8 +149,15 @@ class DemoMoveitInterface(object):
 
         # home pose
         # home_joint_goal = [0.03153623608649902, -0.9909734268950627, -3.017123961090542, -2.1596175153858903, -0.06072380127933297, -1.2676343188412904, 1.69711937836117]
-        home_joint_goal = [-0.006377738178521497, -0.555639266673043, 3.1360338374464707, -2.163956071117738, -0.014774685095541251, -1.0588206514581397, 1.564804081184164]
+        # home_joint_goal = [-0.006377738178521497, -0.555639266673043, 3.1360338374464707, -2.163956071117738, -0.014774685095541251, -1.0588206514581397, 1.564804081184164]
+        home_joint_goal = [-0.039876576266192565, -1.2166917756136009, 3.0783202071472546, -2.010595010268326, 0.023798230124570448, -1.5123021239801782, 1.4359715329227085]
         self.arm_move_group.go(home_joint_goal, wait=True)
+        pass
+
+    def back_to_grasp_state(self):
+        # grasp_state = [-0.003840278291893817, -0.3875597134270894, -3.1351339553141333, -2.2356531613526336, -0.0005928196586522105, -1.2238317104961034, 1.5737672161489347]
+        grasp_state = [-0.03870052432881366, -0.3805699808300673, 3.104453806924202, -1.8106635177528076, -0.015250325666229081, -1.6416582497119432, 1.497566720510715]
+        self.arm_move_group.go(grasp_state, wait=True)
         pass
 
     @staticmethod
@@ -203,6 +210,7 @@ class DemoMoveitInterface(object):
     def grasp_callback(self, grasp_goal):
         # == moveit pose grasp
         # self.back_to_home_state()
+        self.back_to_grasp_state()
 
         # == begin
         grasp_pose = grasp_goal.grasp_pose
@@ -234,8 +242,14 @@ class DemoMoveitInterface(object):
             grasp_T = simple_grasp_Ts[0]
             return grasp_T
 
-        hard_grasp_T = get_hard_T(grasp_Ts)
-        simple_grasp_T = get_simple_T(grasp_Ts)
+        # hard_grasp_T = get_hard_T(grasp_Ts)
+        # simple_grasp_T = get_simple_T(grasp_Ts)
+        # hard_grasp_T = simple_grasp_T
+
+        # hard_grasp_T = get_simple_T(grasp_Ts)
+        # simple_grasp_T = get_hard_T(grasp_Ts)
+        hard_grasp_T = grasp_Ts[0]
+        simple_grasp_T = grasp_Ts[0]
 
         if hard_grasp_T is None:
             print("hard grasp T is None")
@@ -244,16 +258,20 @@ class DemoMoveitInterface(object):
                 print("simple grasp T is None")
                 return
 
+        # == graspgpt
+        # hard_grasp_T = pose_msg_to_T(grasp_pose.pose)
+
         # clear planning scene and wait for update
         ori_planning_scene = self.get_planning_scene()
         ori_planning_scene.world = PlanningSceneWorld()
         self.apply_planning_scene(ori_planning_scene)
-        for i in range(10):
-            self.collision_pcd_pub.publish(grasp_goal.full_cloud)
-            time.sleep(0.1)
-            # cur_planning_scene = self.get_planning_scene()
-            # if len(cur_planning_scene.world.collision_objects) != 0:
-            #     break
+        # for i in range(10):
+        #     # self.collision_pcd_pub.publish(grasp_goal.full_cloud)
+        #     self.collision_pcd_pub.publish(grasp_goal.env_cloud)
+        #     time.sleep(0.1)
+        #     # cur_planning_scene = self.get_planning_scene()
+        #     # if len(cur_planning_scene.world.collision_objects) != 0:
+        #     #     break
         time.sleep(1)
 
         # == moveit pre grasp
@@ -271,46 +289,49 @@ class DemoMoveitInterface(object):
         verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
         if not verify_reach:
             print("pre grasp pose not reached")
+            self.back_to_home_state()
+            return
 
-            # try simple again
-            print("moving to pre grasp pose")
-            # pose_goal = grasp_pose.pose
-            grasp_pose = T_to_pose_msg(simple_grasp_T)
-            grasp_pose = geometry_msgs.msg.PoseStamped(pose=grasp_pose, header=header)
-            pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, -0.03])
-            # print(pose_goal)
-            assert(type(pose_goal) == geometry_msgs.msg.Pose)
-            self.arm_move_group.set_pose_target(pose_goal)
-            success = self.arm_move_group.go(wait=True)
-            self.arm_move_group.stop()
-            self.arm_move_group.clear_pose_targets()
+        #     # try simple again
+        #     print("moving to pre grasp pose")
+        #     # pose_goal = grasp_pose.pose
+        #     grasp_pose = T_to_pose_msg(simple_grasp_T)
+        #     grasp_pose = geometry_msgs.msg.PoseStamped(pose=grasp_pose, header=header)
+        #     pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, -0.03])
+        #     # print(pose_goal)
+        #     assert(type(pose_goal) == geometry_msgs.msg.Pose)
+        #     self.arm_move_group.set_pose_target(pose_goal)
+        #     success = self.arm_move_group.go(wait=True)
+        #     self.arm_move_group.stop()
+        #     self.arm_move_group.clear_pose_targets()
 
-            verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
-            if not verify_reach:
-                print("pre grasp pose not reached")
+        #     verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
+        #     if not verify_reach:
+        #         print("pre grasp pose not reached")
 
-                self.back_to_home_state()
-                return
+        #         self.back_to_home_state()
+        #         return
 
 
         # clear planning scene and wait for update
         ori_planning_scene = self.get_planning_scene()
         ori_planning_scene.world = PlanningSceneWorld()
         self.apply_planning_scene(ori_planning_scene)
-        for i in range(10):
-        # while True:
-            self.collision_pcd_pub.publish(grasp_goal.env_cloud)
-            time.sleep(0.1)
-            # cur_planning_scene = self.get_planning_scene()
-            # if len(cur_planning_scene.world.collision_objects) != 0:
-            #     break
+        # for i in range(10):
+        # # while True:
+        #     self.collision_pcd_pub.publish(grasp_goal.env_cloud)
+        #     time.sleep(0.1)
+        #     # cur_planning_scene = self.get_planning_scene()
+        #     # if len(cur_planning_scene.world.collision_objects) != 0:
+        #     #     break
         time.sleep(1)
 
         # == moveit grasp
         print("moving to grasp pose")
         # pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.108])
 
-        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.100])
+        # pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.100])
+        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.095])
         waypoints = [pose_goal]
         (plan, fraction) = self.arm_move_group.compute_cartesian_path(
             waypoints, 0.01, 0.0  # waypoints to follow  # eef_step

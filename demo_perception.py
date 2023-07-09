@@ -1,5 +1,6 @@
 import os
 import sys
+import shutil
 import cv2
 # os.environ['QT_QPA_PLATFORM'] = 'xcb'
 import matplotlib.pyplot as plt
@@ -27,6 +28,9 @@ project_root_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(project_root_dir, "3rd_contact_graspnet", "contact_graspnet"))
 from my_grasp_api import ContactGraspAPI
 from visualization_utils import my_visualize_grasps
+
+sys.path.append("/home/huangdehao/github_projects/taskgrasp_ws/GraspGPT/gcngrasp")
+from infer_sample import MyGraspGPTAPI
 
 
 def dilate_mask(mask, kernel_size=5, iterations=1):
@@ -155,7 +159,7 @@ def filter_point_cloud(point_cloud, colors=None, downsample_ratio=None, min_neig
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(point_cloud)
     if colors is not None:
-        pcd.colors = o3d.utility.Vector3dVector(colors)
+        pcd.colors = o3d.utility.Vector3dVector(colors.astype(np.float32) / 255.0)
 
     pcd, _ = pcd.remove_radius_outlier(nb_points=min_neighbors, radius=radius)
     if downsample_ratio is not None:
@@ -236,6 +240,17 @@ def numpy_to_pointcloud2(points_array, rgb=None, frame_id="base_link"):
     )
 
     return pc2
+
+
+def downsample_pc(pc, nsample):
+    if pc.shape[0] < nsample:
+        print(
+            'Less points in pc {}, than target dimensionality {}'.format(
+                pc.shape[0],
+                nsample))
+    chosen_one = np.random.choice(
+        pc.shape[0], nsample, replace=pc.shape[1] > nsample)
+    return pc[chosen_one, :], chosen_one
 
 
 def visualize_point_cloud(point_cloud, pcd_color=None, bbox=None, poses=None):
@@ -330,6 +345,9 @@ def T2pose(T):
 
 class Sampler(object):
     def __init__(self, rgb_topic_name, depth_topic_name, camera_info_topic_name):
+        # == graspgpt
+        self.graspgpt_api = MyGraspGPTAPI()
+
         # == SAM
         # self.sam = sam_model_registry["vit_b"](checkpoint="/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/sam_vit_b_01ec64.pth")
         self.sam = sam_model_registry["vit_h"](checkpoint="/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/sam_vit_h_4b8939.pth")
@@ -382,7 +400,7 @@ class Sampler(object):
             cv2.namedWindow("click to one sample", cv2.WINDOW_NORMAL)
             cv2.imshow("click to one sample", np.zeros([100, 100]))
             cv2.waitKey(0)
-            cv2.destroyAllWindows()
+            # cv2.destroyAllWindows()
 
             rospy.loginfo("Getting RGBD Image!")
             rgb_msg = rospy.wait_for_message(rgb_topic_name, Image)
@@ -411,6 +429,11 @@ class Sampler(object):
             grasp_Ts, object_pc, env_pc, full_pc = output
             object_pc, object_pc_color = object_pc[:, :3], object_pc[:, 3:]
 
+            object_pc, object_pc_color = filter_point_cloud(object_pc, colors=object_pc_color, min_neighbors=40, radius=0.01)
+            height = 0.15
+            object_pc_color = np.array([object_pc_color[i] for i in range(len(object_pc)) if object_pc[i][2] > height])
+            object_pc = np.array([p for p in object_pc if p[2] > height])
+
             save_data_dict["K"] = self.K
             save_data_dict["image"] = rgb_image
             save_data_dict["depth"] = (depth_image * 1000.0).astype(np.uint16)
@@ -419,8 +442,9 @@ class Sampler(object):
             save_data_dict["world_grasps"] = grasp_Ts
             save_data_dict["camera_pose"] = camera_pose_T
 
-            save_dir = "/home/huangdehao/github_projects/pybullet_franka/dataset/test"
-            os.makedirs(save_dir, exist_ok=True)
+            save_dir = "/home/huangdehao/github_projects/taskgrasp_ws/GraspGPT/data/sample_data/test"
+            if os.path.exists(save_dir): shutil.rmtree(save_dir)
+            os.makedirs(save_dir, exist_ok=False)
             np.save(os.path.join(save_dir, "ori_data.npy"), save_data_dict)
             np.save(os.path.join(save_dir, "fused_pc_clean.npy"), np.concatenate([save_data_dict["world_pc"], save_data_dict["world_pc_color"]], axis=1))
             np.save(os.path.join(save_dir, "fused_grasps_clean.npy"), save_data_dict["world_grasps"])
@@ -433,8 +457,15 @@ class Sampler(object):
             np.save(os.path.join(save_dir, "0_camera_info.npy"), save_data_dict["camera_pose"])
             np.save(os.path.join(save_dir, "0_camera_pose.npy"), save_data_dict["camera_pose"])
 
-            # == TODO 测试阶段，不操作
-            continue
+            # # == TODO 测试阶段，不操作
+            task = "pour"
+            obj_class = "saucepan.n.01"
+            obj_name = "test"
+            best_grasps, best_grasp, topk_inds = self.graspgpt_api.infer(task=task, obj_class=obj_class, obj_name=obj_name)
+
+            # goal_grasp_T = grasps[0]
+            goal_grasp_T = best_grasp
+            # continue
 
             # == 发送
             goal = GraspGoal()
@@ -443,31 +474,40 @@ class Sampler(object):
             goal.env_cloud = numpy_to_pointcloud2(env_pc, frame_id="base_link")
             goal.obj_cloud = numpy_to_pointcloud2(object_pc, frame_id="base_link")
 
-            goal_grasp_T = grasp_Ts[0]
+            # goal_grasp_T = grasp_Ts[0]
             goal.grasp_pose.pose = T2pose(goal_grasp_T)
 
             # debug
-            pose_stamp_msgs = [PoseStamped(pose=T2pose(T)) for T in grasp_Ts]
+            # pose_stamp_msgs = [PoseStamped(pose=T2pose(T)) for T in grasp_Ts]
+            pose_stamp_msgs = [PoseStamped(pose=T2pose(T)) for T in best_grasps]
             for pose_stamp_msg in pose_stamp_msgs:
                 goal.debug_grasp_poses.append(pose_stamp_msg)
             
             self.client.send_goal(goal)
 
-            rate = rospy.Rate(hz=5)
-            while not rospy.is_shutdown():
+            for i in range(10):
                 self.object_pcd2_pub.publish(numpy_to_pointcloud2(object_pc, frame_id="base_link"))
                 self.env_pcd2_pub.publish(numpy_to_pointcloud2(env_pc, frame_id="base_link"))
 
-                key = cv2.waitKey(1)
-                if key == ord("q"):
-                    break
+            # rate = rospy.Rate(hz=5)
+            # cnt = 0
+            # while not rospy.is_shutdown():
+            #     cnt += 1
+            #     if cnt > 20:
+            #         break
 
-                rate.sleep()
+            #     self.object_pcd2_pub.publish(numpy_to_pointcloud2(object_pc, frame_id="base_link"))
+            #     self.env_pcd2_pub.publish(numpy_to_pointcloud2(env_pc, frame_id="base_link"))
+            #     key = cv2.waitKey(1)
+            #     if key == ord("q"):
+            #         break
+
+            #     rate.sleep()
 
             # self.client.wait_for_result()
             # result = self.client.get_result()
 
-            cv2.destroyAllWindows()
+            # cv2.destroyAllWindows()
             rospy.loginfo("================Finish!================")
 
         # self.rgb_subscriber = message_filters.Subscriber(rgb_topic_name, Image)
@@ -506,8 +546,8 @@ class Sampler(object):
         pass
 
     def test_input(self, rgb_image, depth_image, K, pcd_T=None):
-        DEBUG = True
-        # DEBUG = False
+        # DEBUG = True
+        DEBUG = False
 
         # == 完整点云进行 Grasp Predict
         full_pcd, object_pcd_color, xy = depth2pc(depth_image, K, rgb=rgb_image, max_depth=0.9)
