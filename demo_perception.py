@@ -512,9 +512,37 @@ class Sampler(object):
             # task = "brush"
             # obj_class = "bottlebrush.n.01"
 
-            # 13.
-            task = "pound"
-            obj_class = "hammer.n.01"
+            # # 13.
+            # task = "pound"
+            # obj_class = "hammer.n.01"
+
+            # # 14.
+            # task = "pour"
+            # obj_class = "mug.n.01"
+
+            # # 15.
+            # task = "scoop"
+            # obj_class = "tablespoon.n.01"
+
+            # # 16.
+            # task = "cut"
+            # obj_class = "knife.n.01"
+
+            # # 17.
+            # task = "spray"
+            # obj_class = "bottle.n.01"
+
+            # # 18.
+            # task = "brush"
+            # obj_class = "brush.n.01"
+
+            # # 18.
+            # task = "mix"
+            # obj_class = "fork.n.01"
+
+            # 18.
+            task = "mix"
+            obj_class = "whisk.n.01"
 
             best_grasps, best_grasp, topk_inds = self.graspgpt_api.infer(task=task, obj_class=obj_class, obj_name=obj_name)
 
