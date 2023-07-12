@@ -1,5 +1,7 @@
 import os
 import sys
+import time
+from datetime import datetime
 import shutil
 import cv2
 # os.environ['QT_QPA_PLATFORM'] = 'xcb'
@@ -7,6 +9,7 @@ import matplotlib.pyplot as plt
 import open3d as o3d
 import numpy as np
 from scipy.spatial import ConvexHull
+import trimesh.transformations as tra
 
 import tf
 import rospy
@@ -93,6 +96,45 @@ def filter_segment(contact_pts, segment_pc, thres=0.00001):
             pass
         
     return filtered_grasp_idcs
+
+
+def project_to_xy(T):
+    # Extract rotation matrix R from the homogeneous transformation matrix T
+    R = T[:3, :3]
+    
+    # Calculate the rotation angles around x, y, and z axes
+    # using the Euler angles representation (roll, pitch, yaw)
+    roll = np.arctan2(R[2, 1], R[2, 2])
+    pitch = np.arctan2(-R[2, 0], np.sqrt(R[2, 1]**2 + R[2, 2]**2))
+    yaw = np.arctan2(R[1, 0], R[0, 0])
+
+    z_axis = R[:, 2]
+    z_direction = 'Up' if z_axis[2] > 0 else 'Down'
+    
+    # Create a new rotation matrix R_new using the extracted Euler angles
+    pitch = 0
+    if z_direction == 'Down':
+        pitch = np.pi
+    R_direction_correction = np.array([
+        [1, 0, 0],
+        [0, np.cos(pitch), -np.sin(pitch)],
+        [0, np.sin(pitch), np.cos(pitch)]
+    ])
+
+    R_new = np.array([
+        [np.cos(yaw), -np.sin(yaw), 0],
+        [np.sin(yaw), np.cos(yaw), 0],
+        [0, 0, 1]
+    ])
+
+    R_new = np.matmul(R_new, R_direction_correction)
+    
+    # Combine the new rotation matrix R_new with the original translation vector
+    T_new = np.eye(4)
+    T_new[:3, :3] = R_new
+    T_new[:3, 3] = T[:3, 3]
+    
+    return T_new
 
 
 def read_matrices_from_txt(filepath):
@@ -442,7 +484,8 @@ class Sampler(object):
             save_data_dict["world_grasps"] = grasp_Ts
             save_data_dict["camera_pose"] = camera_pose_T
 
-            save_dir = "/home/huangdehao/github_projects/taskgrasp_ws/GraspGPT/data/sample_data/test"
+            current_datetime = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
+            save_dir = "/home/huangdehao/github_projects/taskgrasp_ws/GraspGPT/data/sample_data/test_" + current_datetime
             if os.path.exists(save_dir): shutil.rmtree(save_dir)
             os.makedirs(save_dir, exist_ok=False)
             np.save(os.path.join(save_dir, "ori_data.npy"), save_data_dict)
@@ -458,15 +501,15 @@ class Sampler(object):
             np.save(os.path.join(save_dir, "0_camera_pose.npy"), save_data_dict["camera_pose"])
 
             # # == TODO 测试阶段，不操作
-            obj_name = "test"
+            obj_name = "test_" + current_datetime
 
             # # 1.
             # task = "pour"
             # obj_class = "saucepan.n.01"
 
             # # 2.
-            # task = "saute"
-            # obj_class = "saucepot.n.01"
+            # task = "pour"
+            # obj_class = "cup.n.01"
 
             # # 3.
             # task = "pour"
@@ -474,7 +517,7 @@ class Sampler(object):
 
             # # 4.
             # task = "handover"
-            # obj_class = "cup.n.01"
+            # obj_class = "ladle.n.01"
 
             # # 5.
             # task = "screw"
@@ -482,18 +525,18 @@ class Sampler(object):
 
             # # 5.
             # task = "scoop"
-            # obj_class = "wooden_spoon.n.01"
+            # obj_class = "fork.n.01"
 
             # # 6.
             # task = "brush"
             # obj_class = "brush.n.01"
 
             # # 7.
-            # task = "spray"
+            # task = "pour"
             # obj_class = "bottle.n.01"
 
             # # 8.
-            # task = "flip"
+            # task = "handover"
             # obj_class = "spatula.n.01"
 
             # # 9.
@@ -513,12 +556,18 @@ class Sampler(object):
             # obj_class = "bottlebrush.n.01"
 
             # # 13.
-            # task = "pound"
+            # task = "handover"
             # obj_class = "hammer.n.01"
+
+            # task = "handover"
+            # obj_class = "book.n.01"
 
             # # 14.
             # task = "pour"
             # obj_class = "mug.n.01"
+            
+            # task = "mix"
+            # obj_class = "tongs.n.01"
 
             # # 15.
             # task = "scoop"
@@ -540,11 +589,53 @@ class Sampler(object):
             # task = "mix"
             # obj_class = "fork.n.01"
 
-            # 18.
-            task = "mix"
-            obj_class = "whisk.n.01"
+            # # 18.
+            # task = "mix"
+            # obj_class = "whisk.n.01"
 
-            best_grasps, best_grasp, topk_inds = self.graspgpt_api.infer(task=task, obj_class=obj_class, obj_name=obj_name)
+            best_grasps, best_grasp, probs = self.graspgpt_api.infer(task=task, obj_class=obj_class, obj_name=obj_name)
+            best_grasp = best_grasps[0]
+
+            # 针对物体决定是否旋转 180°
+            obj_cat = "pot"
+            if obj_cat == "pot":
+                object_pc_center = np.mean(object_pc, axis=0)
+
+                grasp_center = best_grasp[:3, 3]
+
+                transform = tra.euler_matrix(0, 0, 0)
+                transform[1, 3] = 0.01
+                forward_best_grasp = np.array(np.matmul(best_grasp, transform))
+                forward_grasp_center = forward_best_grasp[:3, 3]
+
+                normal_distance = np.linalg.norm(object_pc_center - grasp_center)
+                forward_distance = np.linalg.norm(object_pc_center - forward_grasp_center)
+                
+                if forward_distance > normal_distance:
+                    transform = tra.euler_matrix(0, 0, np.deg2rad(180))
+                    best_grasp = np.array(np.matmul(best_grasp, transform))
+
+                # 投影为 top-down
+                transform = tra.euler_matrix(0, 0, 0)
+                transform[2, 3] = 0.07
+                transform_inv = np.linalg.inv(transform)
+                best_grasp = np.array(np.matmul(best_grasp, transform))
+                best_grasp = project_to_xy(best_grasp)
+                best_grasp = np.array(np.matmul(best_grasp, transform_inv))
+
+            best_grasps[0] = best_grasp
+
+
+            graspgpt_data_dict = {
+                "task": task,
+                "obj_class": obj_class,
+                "obj_name": obj_name,
+
+                "best_grasps": best_grasps,
+                "best_grasp": best_grasp,
+                "probs": probs,
+            }
+            np.save(os.path.join(save_dir, "graspgpt_data.npy"), graspgpt_data_dict)
 
             cv2.namedWindow("exit to one sample", cv2.WINDOW_NORMAL)
             cv2.imshow("exit to one sample", np.zeros([100, 100]))
@@ -574,9 +665,10 @@ class Sampler(object):
             
             self.client.send_goal(goal)
 
-            for i in range(10):
+            for i in range(20):
                 self.object_pcd2_pub.publish(numpy_to_pointcloud2(object_pc, frame_id="base_link"))
                 self.env_pcd2_pub.publish(numpy_to_pointcloud2(env_pc, frame_id="base_link"))
+                time.sleep(0.5)
 
             # rate = rospy.Rate(hz=5)
             # cnt = 0
