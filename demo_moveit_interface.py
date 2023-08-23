@@ -250,7 +250,7 @@ class DemoMoveitInterface(object):
             return True
 
     def grasp_callback(self, grasp_goal):
-        enable_collision = True
+        enable_collision = False
 
         # == moveit pose grasp
         # self.back_to_home_state()
@@ -295,6 +295,7 @@ class DemoMoveitInterface(object):
 
         # hard_grasp_T = get_simple_T(grasp_Ts)
         # simple_grasp_T = get_hard_T(grasp_Ts)
+        grasp_Ts[0][1, 3] -= 0.03
         hard_grasp_T = grasp_Ts[0]
         simple_grasp_T = grasp_Ts[0]
 
@@ -395,11 +396,12 @@ class DemoMoveitInterface(object):
         # pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.108])
 
         # pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.100])
-        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.085])
+        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.084])
         waypoints = [pose_goal]
         (plan, fraction) = self.arm_move_group.compute_cartesian_path(
             waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
         )
+        print(plan)
         success = self.arm_move_group.execute(plan, wait=True)
         # self.arm_move_group.stop()
         # self.arm_move_group.clear_pose_targets()
@@ -423,10 +425,10 @@ class DemoMoveitInterface(object):
         self.example_send_gripper_command(value=1.0)
 
         # 进行 manipulation
-        # action = "normal"
+        action = "normal"
         # action = "pour"
         # action = "place"
-        action = "cut"
+        # action = "cut"
 
         if action == "cut":
             # 举起来
@@ -757,7 +759,6 @@ class DemoMoveitInterface(object):
 
         elif action == "cut":
             pass
-
         else:  # 正常的动作
             # == moveit pose grasp
             print("moving to grasp pose")

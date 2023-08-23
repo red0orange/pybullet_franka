@@ -503,13 +503,36 @@ class Sampler(object):
             # # == TODO 测试阶段，不操作
             obj_name = "test_" + current_datetime
 
+
             # # 1.
             # task = "pour"
             # obj_class = "saucepan.n.01"
 
             # # 2.
             # task = "pour"
+            # obj_class = "saucepan.n.01"
+
+
+            # 2.
+            topdown = True
+            task = "pound"
+            obj_class = "hammer.n.01"
+
+            # # 7.
+            # topdown = True
+            # task = "pour"
+            # obj_class = "saucepot.n.01"
+
+            # # 7.
+            # topdown = False
+            # task = "pour"
             # obj_class = "cup.n.01"
+
+            # # 7.
+            # topdown = False
+            # task = "pour"
+            # obj_class = "bottle.n.01"
+
 
             # # 3.
             # task = "pour"
@@ -615,13 +638,14 @@ class Sampler(object):
                     transform = tra.euler_matrix(0, 0, np.deg2rad(180))
                     best_grasp = np.array(np.matmul(best_grasp, transform))
 
-                # 投影为 top-down
-                transform = tra.euler_matrix(0, 0, 0)
-                transform[2, 3] = 0.07
-                transform_inv = np.linalg.inv(transform)
-                best_grasp = np.array(np.matmul(best_grasp, transform))
-                best_grasp = project_to_xy(best_grasp)
-                best_grasp = np.array(np.matmul(best_grasp, transform_inv))
+                if topdown:
+                    # 投影为 top-down
+                    transform = tra.euler_matrix(0, 0, 0)
+                    transform[2, 3] = 0.07
+                    transform_inv = np.linalg.inv(transform)
+                    best_grasp = np.array(np.matmul(best_grasp, transform))
+                    best_grasp = project_to_xy(best_grasp)
+                    best_grasp = np.array(np.matmul(best_grasp, transform_inv))
 
             best_grasps[0] = best_grasp
 
