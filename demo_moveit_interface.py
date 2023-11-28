@@ -396,7 +396,7 @@ class DemoMoveitInterface(object):
         # pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.108])
 
         # pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.100])
-        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.084])
+        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.088])
         waypoints = [pose_goal]
         (plan, fraction) = self.arm_move_group.compute_cartesian_path(
             waypoints, 0.01, 0.0  # waypoints to follow  # eef_step

@@ -513,15 +513,20 @@ class Sampler(object):
             # obj_class = "saucepan.n.01"
 
 
-            # 2.
-            topdown = True
-            task = "pound"
-            obj_class = "hammer.n.01"
-
-            # # 7.
+            # # 2.
             # topdown = True
-            # task = "pour"
-            # obj_class = "saucepot.n.01"
+            # task = "pound"
+            # obj_class = "hammer.n.01"
+
+            # 7.
+            topdown = True
+            task = "pour"
+            obj_class = "saucepot.n.01"
+
+            # # 15.
+            # topdown = True
+            # task = "scoop"
+            # obj_class = "tablespoon.n.01"
 
             # # 7.
             # topdown = False
