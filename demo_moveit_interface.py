@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 from multiprocessing.connection import wait
+import os
 import sys
 import time
 import copy
@@ -20,6 +21,7 @@ from std_msgs.msg import String
 from moveit_commander.conversions import pose_to_list
 
 from moveit_msgs.msg import PlanningScene, PlanningSceneWorld, PlanningSceneComponents
+from moveit_msgs.msg import RobotTrajectory
 from moveit_msgs.srv import GetPlanningScene, ApplyPlanningScene
 from kortex_driver.srv import *
 from kortex_driver.msg import *
@@ -28,6 +30,7 @@ from my_robot.msg import GraspAction
 
 from utils.tf import *
 import utils.geometry as geometry
+from demo_utils import *
 
 
 def pose_msg_to_T(pose_msg):
@@ -171,9 +174,9 @@ class DemoMoveitInterface(object):
         joint_state = "\n".join(re.findall(
             "position" + '.*', str(robot_cur_state)))
         print("============ Printing robot state: {}".format(joint_state))
+        joints = self.arm_move_group.get_current_joint_values()
 
         print(self.get_cur_pose())
-
         self.back_to_home_state()
         pass
 
@@ -269,6 +272,19 @@ class DemoMoveitInterface(object):
         grasp_Ts     = [pose_msg_to_T(pose.pose) for pose in grasp_poses]
         angle_z_xy_plane = [calculate_angle_with_xy_plane(T) for T in grasp_Ts]
         print(angle_z_xy_plane)
+
+        # @note debug pose 的 header frame_id 用来放 manipulation 的指定序列
+        save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "manipulate_trajs")
+        manipulation_seq_name = "pound"
+        # manipulation_seq_name = grasp_goal.debug_grasp_poses.header.frame_id
+        mani_seq_path = os.path.join(save_dir, manipulation_seq_name + ".npy")
+        print("===================================")
+        if os.path.exists(mani_seq_path):
+            print("manipulation sequence found: {}".format(mani_seq_path))
+        else:
+            print("manipulation sequence not found, will not do manipulation")
+        print("===================================")
+        
 
         def get_hard_T(grasp_Ts):
             hard_grasp_Ts = [grasp_Ts[i] for i in range(len(grasp_Ts)) if angle_z_xy_plane[i] < 100]
@@ -427,342 +443,11 @@ class DemoMoveitInterface(object):
         self.example_send_gripper_command(value=1.0)
 
         # 进行 manipulation
-        action = "normal"
-        # action = "pour"
-        # action = "place"
-        # action = "cut"
+        if not os.path.exists(mani_seq_path):
+            print("manipulation sequence not found")
+            # @note 仅 Grasp 时，不进行 manipulation
 
-        if action == "cut":
-            # 举起来
-            pose_goal = self.get_cur_pose()
-            pose_goal.position.z += 0.15
-            waypoints = [pose_goal]
-            (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-                waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            )
-            success = self.arm_move_group.execute(plan, wait=True)
-
-            # 归位
-            joint = [-0.01698990249026977, 0.24362972159073162, 3.1230834176976336, -1.4502275673959568, 0.06931690665539374, -1.8496830887802123, 1.573086112700146]
-            self.go_to_specify_joint(joint)
-
-            # 目标位置
-            pose = [0.4551979578004415, -0.09460965088200658, 0.2913777939533833]
-            pose_goal = T_to_pose_msg(sevenDof2T(pose + [0, 0, 0, 1]))
-            pose_goal.orientation = self.get_cur_pose().orientation
-            waypoints = [pose_goal]
-            (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-                waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            )
-            success = self.arm_move_group.execute(plan, wait=True)
-
-            # 往上铲
-            c = pose_msg_to_c(self.get_cur_pose())
-            c.rotate([-np.deg2rad(-10), 0, 0])
-            pose_goal = T_to_pose_msg(pybullet2T(c.pose))
-            waypoints = [pose_goal]
-            (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-                waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            )
-            success = self.arm_move_group.execute(plan, wait=True)
-            time.sleep(1)
-
-            # 往斜下方铲
-            pose_goal = self.get_cur_pose()
-            pose_goal.position.x += 0.08
-            pose_goal.position.z -= 0.08
-            waypoints = [pose_goal]
-            (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-                waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            )
-            success = self.arm_move_group.execute(plan, wait=True)
-            time.sleep(2)
-
-            # 往上铲
-            c = pose_msg_to_c(self.get_cur_pose())
-            c.rotate([-np.deg2rad(10), 0, 0])
-            c.translate([0.01, 0, 0.0])
-            pose_goal = T_to_pose_msg(pybullet2T(c.pose))
-            waypoints = [pose_goal]
-            (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-                waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            )
-            success = self.arm_move_group.execute(plan, wait=True)
-            time.sleep(1)
-
-            # 抬起来
-            pose_goal = self.get_cur_pose()
-            pose_goal.position.z += 0.15
-            waypoints = [pose_goal]
-            (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-                waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            )
-            success = self.arm_move_group.execute(plan, wait=True)
-            time.sleep(2)
-
-            # # 移动到目标位置
-            # pose = [0.2947997610512299, 0.11903731873544133, 0.2743777939533833]
-            # pose_goal = T_to_pose_msg(sevenDof2T(pose + [0, 0, 0, 1]))
-            # pose_goal.orientation = self.get_cur_pose().orientation
-            # waypoints = [pose_goal]
-            # (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-            #     waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            # )
-            # success = self.arm_move_group.execute(plan, wait=True)
-
-            # # 倒
-            # cur_pose = self.get_cur_pose()
-            # cur_pose = [[cur_pose.position.x, cur_pose.position.y, cur_pose.position.z], [cur_pose.orientation.x, cur_pose.orientation.y, cur_pose.orientation.z, cur_pose.orientation.w]]
-            # z_angle = compute_z_angle(pybullet2T(cur_pose))
-            # if z_angle > 45:  # 竖着抓的
-            #     c = geometry.Coordinate(cur_pose[0], cur_pose[1])
-            #     c.rotate([0, np.deg2rad(-90), 0], wrt="local")
-            #     pose_goal = T_to_pose_msg(pybullet2T(c.pose))
-
-            #     waypoints = [pose_goal]
-            #     (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-            #         waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            #     )
-            #     success = self.arm_move_group.execute(plan, wait=True)
-            #     self.arm_move_group.stop()
-            #     self.arm_move_group.clear_pose_targets()
-            #     time.sleep(5)
-
-            #     # self.arm_move_group.set_pose_target(pose_goal)
-            #     # success = self.arm_move_group.go(wait=True)
-            #     # self.arm_move_group.stop()
-            #     # self.arm_move_group.clear_pose_targets()
-
-            #     # verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
-            #     # if not verify_reach:
-            #     #     print("pour pose not reached")
-            #     #     c = geometry.Coordinate(cur_pose[0], cur_pose[1])
-            #     #     c.rotate([0, np.deg2rad(-90), 0], wrt="local")
-            #     #     pose_goal = T_to_pose_msg(pybullet2T(c.pose))
-
-            #     #     waypoints = [pose_goal]
-            #     #     (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-            #     #         waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            #     #     )
-            #     #     success = self.arm_move_group.execute(plan, wait=True)
-            #     #     self.arm_move_group.stop()
-            #     #     self.arm_move_group.clear_pose_targets()
-
-            #     #     # self.arm_move_group.set_pose_target(pose_goal)
-            #     #     # success = self.arm_move_group.go(wait=True)
-            #     #     # self.arm_move_group.stop()
-            #     #     # self.arm_move_group.clear_pose_targets()
-
-            #     #     verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
-            #     #     if not verify_reach:
-            #     #         print("pour pose not reached")
-            #     #         self.back_to_home_state()
-            # else:  # 横着抓的
-            #     c = geometry.Coordinate(cur_pose[0], cur_pose[1])
-            #     c.rotate([0, 0, np.deg2rad(120)], wrt="local")
-            #     pose_goal = T_to_pose_msg(pybullet2T(c.pose))
-            #     self.arm_move_group.set_pose_target(pose_goal)
-            #     success = self.arm_move_group.go(wait=True)
-            #     self.arm_move_group.stop()
-            #     self.arm_move_group.clear_pose_targets()
-            #     verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
-            #     if not verify_reach:
-            #         print("pour pose not reached")
-            #         c = geometry.Coordinate(cur_pose[0], cur_pose[1])
-            #         c.rotate([0, 0, np.deg2rad(-110)], wrt="local")
-            #         pose_goal = T_to_pose_msg(pybullet2T(c.pose))
-            #         self.arm_move_group.set_pose_target(pose_goal)
-            #         success = self.arm_move_group.go(wait=True)
-            #         self.arm_move_group.stop()
-            #         self.arm_move_group.clear_pose_targets()
-            #         verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
-            #         if not verify_reach:
-            #             print("pour pose not reached")
-            #             self.back_to_home_state()
-            
-            # # 放下勺子
-            # self.back_to_grasp_state()
-
-            # pose = [0.2853296484923709, 0.09734829990176541, 0.3]
-            # pose_goal = T_to_pose_msg(sevenDof2T(pose + [0, 0, 0, 1]))
-            # pose_goal.orientation.x = 0.018073192860724323
-            # pose_goal.orientation.y = 0.9992255928086577
-            # pose_goal.orientation.z = 0.003314989414865834
-            # pose_goal.orientation.w = 0.03479346520807617
-            # waypoints = [pose_goal]
-            # (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-            #     waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            # )
-            # success = self.arm_move_group.execute(plan, wait=True)
-
-            # pose_goal = self.get_cur_pose()
-            # pose_goal.position.z -= 0.16
-            # waypoints = [pose_goal]
-            # (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-            #     waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            # )
-            # success = self.arm_move_group.execute(plan, wait=True)
-
-            self.example_send_gripper_command(value=0.2)
-            pass
-
-        elif action == "pour":
-            # 举起来
-            pose_goal = self.get_cur_pose()
-            pose_goal.position.z += 0.15
-            waypoints = [pose_goal]
-            (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-                waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            )
-            success = self.arm_move_group.execute(plan, wait=True)
-
-            # 归位
-            self.back_to_grasp_state()
-
-            # 移到目标位置
-            pose = [0.4881979578004415, -0.12460965088200658, 0.3043777939533833]
-            pose_goal = T_to_pose_msg(sevenDof2T(pose + [0, 0, 0, 1]))
-            pose_goal.orientation = self.get_cur_pose().orientation
-            waypoints = [pose_goal]
-            (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-                waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            )
-            success = self.arm_move_group.execute(plan, wait=True)
-
-            # 倒
-            cur_pose = self.get_cur_pose()
-            cur_pose = [[cur_pose.position.x, cur_pose.position.y, cur_pose.position.z], [cur_pose.orientation.x, cur_pose.orientation.y, cur_pose.orientation.z, cur_pose.orientation.w]]
-            z_angle = compute_z_angle(hard_grasp_T)
-            if z_angle > 45:  # 竖着抓的
-                c = geometry.Coordinate(cur_pose[0], cur_pose[1])
-                c.rotate([0, np.deg2rad(-110), 0], wrt="local")
-                pose_goal = T_to_pose_msg(pybullet2T(c.pose))
-
-                waypoints = [pose_goal]
-                (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-                    waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-                )
-                success = self.arm_move_group.execute(plan, wait=True)
-                self.arm_move_group.stop()
-                self.arm_move_group.clear_pose_targets()
-                time.sleep(5)
-
-                # self.arm_move_group.set_pose_target(pose_goal)
-                # success = self.arm_move_group.go(wait=True)
-                # self.arm_move_group.stop()
-                # self.arm_move_group.clear_pose_targets()
-
-                # verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
-                # if not verify_reach:
-                #     print("pour pose not reached")
-                #     c = geometry.Coordinate(cur_pose[0], cur_pose[1])
-                #     c.rotate([0, np.deg2rad(-90), 0], wrt="local")
-                #     pose_goal = T_to_pose_msg(pybullet2T(c.pose))
-
-                #     waypoints = [pose_goal]
-                #     (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-                #         waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-                #     )
-                #     success = self.arm_move_group.execute(plan, wait=True)
-                #     self.arm_move_group.stop()
-                #     self.arm_move_group.clear_pose_targets()
-
-                #     # self.arm_move_group.set_pose_target(pose_goal)
-                #     # success = self.arm_move_group.go(wait=True)
-                #     # self.arm_move_group.stop()
-                #     # self.arm_move_group.clear_pose_targets()
-
-                #     verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
-                #     if not verify_reach:
-                #         print("pour pose not reached")
-                #         self.back_to_home_state()
-            else:  # 横着抓的
-                c = geometry.Coordinate(cur_pose[0], cur_pose[1])
-                c.rotate([0, 0, np.deg2rad(110)], wrt="local")
-                pose_goal = T_to_pose_msg(pybullet2T(c.pose))
-                self.arm_move_group.set_pose_target(pose_goal)
-                success = self.arm_move_group.go(wait=True)
-                self.arm_move_group.stop()
-                self.arm_move_group.clear_pose_targets()
-                verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
-                if not verify_reach:
-                    print("pour pose not reached")
-                    c = geometry.Coordinate(cur_pose[0], cur_pose[1])
-                    c.rotate([0, 0, np.deg2rad(-110)], wrt="local")
-                    pose_goal = T_to_pose_msg(pybullet2T(c.pose))
-                    self.arm_move_group.set_pose_target(pose_goal)
-                    success = self.arm_move_group.go(wait=True)
-                    self.arm_move_group.stop()
-                    self.arm_move_group.clear_pose_targets()
-                    verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
-                    if not verify_reach:
-                        print("pour pose not reached")
-                        self.back_to_home_state()
-
-            time.sleep(2)
-
-            # # 放下来
-            # self.back_to_grasp_state()
-
-            # pose = [0.3053296484923709, 0.02734829990176541, 0.3]
-            # pose_goal = T_to_pose_msg(sevenDof2T(pose + [0, 0, 0, 1]))
-            # pose_goal.orientation.x = 0.018073192860724323
-            # pose_goal.orientation.y = 0.9992255928086577
-            # pose_goal.orientation.z = 0.003314989414865834
-            # pose_goal.orientation.w = 0.03479346520807617
-            # waypoints = [pose_goal]
-            # (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-            #     waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            # )
-            # success = self.arm_move_group.execute(plan, wait=True)
-
-            # pose_goal = self.get_cur_pose()
-            # pose_goal.position.z -= 0.12
-            # waypoints = [pose_goal]
-            # (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-            #     waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            # )
-            # success = self.arm_move_group.execute(plan, wait=True)
-
-            # joint_goal = [-0.1692540072866775, 0.24677103660977778, 3.054517139640235, -2.0491738281353227, 0.05966495755824166, -0.7797085860446034, 1.27590383350015]
-            # self.go_to_specify_joint(joint_goal)
-
-            self.example_send_gripper_command(value=0.2)
-            pass
-
-        elif action == "place":
-            # 举起来
-            pose_goal = self.get_cur_pose()
-            pose_goal.position.z += 0.15
-            waypoints = [pose_goal]
-            (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-                waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            )
-            success = self.arm_move_group.execute(plan, wait=True)
-
-            # # 移到目标位置
-            joint = [0.4352411493209497, -0.09204736938862634, 2.3975259513620477, -1.6666046122749334, -0.2740957351842628, -0.7511797391832378, 2.323698864887307]
-            self.go_to_specify_joint(joint)
-
-            # pose = [0.39228432546185626, 0.30755358627124346, 0.3034245668226253]
-            # pose_goal = T_to_pose_msg(sevenDof2T(pose + [0, 0, 0, 1]))
-            # pose_goal.orientation = self.get_cur_pose().orientation
-            # waypoints = [pose_goal]
-            # (plan, fraction) = self.arm_move_group.compute_cartesian_path(
-            #     waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
-            # )
-            # success = self.arm_move_group.execute(plan, wait=True)
-
-            # == 放置 
-            time.sleep(3.0)
-            print("gripper release")
-            self.example_send_gripper_command(value=0.2)
-            pass
-
-        elif action == "cut":
-            pass
-        else:  # 正常的动作
-            # == moveit pose grasp
+            # 举起 0.2m
             print("moving to grasp pose")
             pose_goal = self.get_cur_pose()
             pose_goal.position.z += 0.2
@@ -789,10 +474,55 @@ class DemoMoveitInterface(object):
                 self.back_to_home_state()
                 return
 
-            # == 
+            # 松开 
             time.sleep(1.0)
             print("gripper release")
             self.example_send_gripper_command(value=0.2)
+        else:
+            # 举起 0.2m
+            print("moving to grasp pose")
+            pose_goal = self.get_cur_pose()
+            pose_goal.position.z += 0.2
+            # pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.108])
+            waypoints = [pose_goal]
+            (plan, fraction) = self.arm_move_group.compute_cartesian_path(
+                waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
+            )
+            success = self.arm_move_group.execute(plan, wait=True)
+            verify_reach = self.verify_pose(pose_goal, self.get_cur_pose(), 0.01)
+            if not verify_reach:
+                print("grasp pose not reached")
+                self.back_to_home_state()
+                return
+            
+            # @note 执行对应的 manipulation
+            mani_seq_data_dict = np.load(mani_seq_path, allow_pickle=True).item()
+
+            fps = 20
+            finish_flag = False
+            cnt = 0
+            while not finish_flag and cnt < 3:
+                cnt += 1
+                mani_seq = mani_seq_data_dict["joints_traj"]
+                mani_v = mani_seq_data_dict["v_traj"]
+
+                downsample_ratio = 4
+                mani_seq = mani_seq[::downsample_ratio]
+                mani_v = mani_v[::downsample_ratio]
+
+                print("original manipulation sequence length: {}".format(len(mani_seq)))
+                mani_seq = process_traj(mani_seq, threshold=0.01)   # @note
+                # mani_seq = resample_trajectory(mani_seq, num_points=len(mani_seq))   # @note
+                print("processed manipulation sequence length: {}".format(len(mani_seq)))
+
+                # 去到 manipulation 的起始点
+                mani_start = mani_seq[0]
+                self.go_to_specify_joint(mani_start)
+                robot_traj = joints_traj_to_robot_traj(mani_seq, velocity=mani_v, duration=(1.0 / fps))
+                # robot_traj = joints_traj_to_robot_traj(mani_seq, duration=(1.0 / fps))
+                finish_flag = self.arm_move_group.execute(robot_traj, wait=True)
+
+                fps /= 2  # @note 降低 fps
 
         # == 
         time.sleep(0.5)
