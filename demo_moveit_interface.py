@@ -194,7 +194,8 @@ class DemoMoveitInterface(object):
 
     def back_to_grasp_state(self):
         # grasp_state = [-0.003840278291893817, -0.3875597134270894, -3.1351339553141333, -2.2356531613526336, -0.0005928196586522105, -1.2238317104961034, 1.5737672161489347]
-        grasp_state = [-0.03870052432881366, -0.3805699808300673, 3.104453806924202, -1.8106635177528076, -0.015250325666229081, -1.6416582497119432, 1.497566720510715]
+        # grasp_state = [-0.03870052432881366, -0.3805699808300673, 3.104453806924202, -1.8106635177528076, -0.015250325666229081, -1.6416582497119432, 1.497566720510715]
+        grasp_state = [-0.04285931668708187, -0.2992556832666775, 3.1413361911768183, -2.0276917055183077, 0.05497603801785843, -1.1224648751888529, 1.4403721403079552]
         self.arm_move_group.go(grasp_state, wait=True)
         pass
 
@@ -395,8 +396,9 @@ class DemoMoveitInterface(object):
         print("moving to grasp pose")
         # pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.108])
 
+        # @note grasp depth
         # pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.100])
-        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.088])
+        pose_goal = self.translate_pose_msg(grasp_pose.pose, [0, 0, 0.090])
         waypoints = [pose_goal]
         (plan, fraction) = self.arm_move_group.compute_cartesian_path(
             waypoints, 0.01, 0.0  # waypoints to follow  # eef_step

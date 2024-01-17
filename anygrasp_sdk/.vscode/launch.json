@@ -1,0 +1,46 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: 当前文件",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Python: demo",
+            "type": "python",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/grasp_detection",
+            "program": "demo.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--checkpoint_path",
+                "log/checkpoint_detection.tar",
+                "--debug"
+                // "--top_down_grasp"
+            ]
+        },
+        {
+            "name": "Python: my demo",
+            "type": "python",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/grasp_detection",
+            "program": "my_demo.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--checkpoint_path",
+                "log/checkpoint_detection.tar",
+                "--debug"
+                // "--top_down_grasp"
+            ]
+        }
+    ]
+}

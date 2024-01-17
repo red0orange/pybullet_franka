@@ -29,16 +29,13 @@ from utils.tk_combo_box import *
 from segment_anything import SamAutomaticMaskGenerator, sam_model_registry, SamPredictor
 
 project_root_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(project_root_dir, "3rd_contact_graspnet", "contact_graspnet"))
-from my_grasp_api import ContactGraspAPI
-from visualization_utils import my_visualize_grasps
+sys.path.append(os.path.join(project_root_dir, "anygrasp_sdk", "grasp_detection"))
+from my_grasp_api import AnyGraspAPI
 
 # @note 选择 baseline
-# sys.path.append("/home/huangdehao/github_projects/taskgrasp_ws/GraspGPT/gcngrasp")  # real exp
-
-sys.path.append("/home/huangdehao/github_projects/taskgrasp_ws/GraspGPT++/gcngrasp")
+# sys.path.append("/home/huangdehao/github_projects/taskgrasp_ws/GraspGPT/gcngrasp")
 # sys.path.append("/home/huangdehao/github_projects/taskgrasp_ws/GraspGPT_exp/gcngrasp")
-# sys.path.append("/home/huangdehao/github_projects/taskgrasp_ws/TaskGrasp/gcngrasp")
+sys.path.append("/home/huangdehao/github_projects/taskgrasp_ws/TaskGrasp/gcngrasp")
 
 from infer_sample import MyGraspGPTAPI
 
@@ -97,6 +94,20 @@ def filter_segment(contact_pts, segment_pc, thres=0.00001):
     if contact_pts.shape[0] > 0 and segment_pc.shape[0] > 0:
         try:
             dists = contact_pts[:,:3].reshape(-1,1,3) - segment_pc.reshape(1,-1,3)           
+            min_dists = np.min(np.linalg.norm(dists,axis=2),axis=1)
+            filtered_grasp_idcs = np.where(min_dists<thres)
+        except:
+            pass
+        
+    return filtered_grasp_idcs
+
+
+def center_filter_segment(center_pts, segment_pc, thres=0.05):
+    filtered_grasp_idcs = np.array([],dtype=np.int32)
+    
+    if center_pts.shape[0] > 0 and segment_pc.shape[0] > 0:
+        try:
+            dists = center_pts[:,:3].reshape(-1,1,3) - segment_pc.reshape(1,-1,3)           
             min_dists = np.min(np.linalg.norm(dists,axis=2),axis=1)
             filtered_grasp_idcs = np.where(min_dists<thres)
         except:
@@ -395,8 +406,8 @@ def T2pose(T):
 class Sampler(object):
     def __init__(self, rgb_topic_name, depth_topic_name, camera_info_topic_name):
         # == tk
-        task_list = ['brush', 'clean', 'clip', 'crush', 'curl', 'cut', 'dig', 'dispense', 'drink', 'dust', 'flatten', 'flip', 'funnel', 'grate', 'grind', 'hammer', 'handover', 'hang', 'juice', 'ladle', 'lift', 'lock', 'mash', 'mix', 'open', 'paint', 'peel', 'pick up', 'plug in', 'poke', 'pound', 'pour', 'roll', 'saute', 'scoop', 'scrape', 'scratch', 'screw', 'scrub', 'shake', 'sharpen', 'sift', 'skewer', 'skim', 'slice', 'spray', 'squeegee', 'squeeze', 'stab', 'stir', 'straighten', 'strain', 'sweep', 'tenderize', 'till', 'turn on']
-        obj_list = ['atomizer.n.01', 'atomizer.n.01', 'atomizer.n.01', 'backscratcher.n.02', 'basket.n.01', 'basket.n.01', 'baster.n.03', 'baster.n.03', 'beer_mug.n.01', 'book.n.02', 'bottle.n.01', 'bottle.n.01', 'bottle.n.01', 'bottlebrush.n.01', 'bottlebrush.n.01', 'brush.n.02', 'brush.n.02', 'can_opener.n.01', 'can_opener.n.01', 'can_opener.n.01', 'can_opener.n.01', 'cereal_bowl.n.01', 'cereal_bowl.n.01', 'charger.n.02', 'clamp.n.01', 'coat_hanger.n.01', 'coffee_mug.n.01', 'coffee_mug.n.01', 'coffee_mug.n.01', 'coffee_mug.n.01', 'colander.n.01', 'colander.n.01', 'control.n.09', 'cookie_cutter.n.01', 'cookie_cutter.n.01', 'cookie_cutter.n.01', 'cup.n.01', 'cup.n.01', 'cup.n.01', 'cup.n.01', 'cup.n.01', 'cup.n.01', 'cup.n.01', 'cup.n.01', 'cup.n.01', 'cup.n.01', 'dustcloth.n.01', 'dustcloth.n.01', 'dustpan.n.02', 'dustpan.n.02', 'dustpan.n.02', 'dustpan.n.02', 'flashlight.n.01', 'fork.n.01', 'fork.n.01', 'fork.n.04', 'frying_pan.n.01', 'frying_pan.n.01', 'frying_pan.n.01', 'frying_pan.n.01', 'frying_pan.n.01', 'frying_pan.n.01', 'frying_pan.n.01', 'funnel.n.02', 'funnel.n.02', 'funnel.n.02', 'garlic_press.n.01', 'garlic_press.n.01', 'grater.n.01', 'grater.n.01', 'hair_spray.n.01', 'hammer.n.02', 'hammer.n.02', 'hammer.n.02', 'keg.n.02', 'knife.n.01', 'knife.n.01', 'knife.n.01', 'ladle.n.01', 'ladle.n.01', 'ladle.n.01', 'masher.n.02', 'masher.n.02', 'masher.n.02', 'measuring_cup.n.01', 'measuring_cup.n.01', 'mixing_bowl.n.01', 'mortar.n.03', 'mug.n.04', 'nozzle.n.01', 'paint_roller.n.01', 'paint_roller.n.01', 'paint_roller.n.01', 'pancake_turner.n.01', 'pancake_turner.n.01', 'pancake_turner.n.01', 'pancake_turner.n.01', 'pancake_turner.n.01', 'pancake_turner.n.01', 'pancake_turner.n.01', 'pancake_turner.n.01', 'peeler.n.03', 'peeler.n.03', 'pepper_mill.n.01', 'pitcher.n.02', 'pitcher.n.02', 'pitcher.n.02', 'pitcher.n.02', 'reamer.n.01', 'roller.n.04', 'rolling_pin.n.01', 'rolling_pin.n.01', 'rolling_pin.n.01', 'rolling_pin.n.01', 'saltshaker.n.01', 'saltshaker.n.01', 'saucepan.n.01', 'saucepan.n.01', 'saucepan.n.01', 'saucepan.n.01', 'saucepan.n.01', 'saucepot.n.01', 'scissors.n.01', 'scissors.n.01', 'scissors.n.01', 'scoop.n.05', 'scoop.n.06', 'scraper.n.01', 'scraper.n.01', 'scraper.n.01', 'screwdriver.n.01', 'scrub_brush.n.01', 'scrub_brush.n.01', 'scrub_brush.n.01', 'scrub_brush.n.01', 'scrub_brush.n.01', 'scrub_brush.n.01', 'scrub_brush.n.01', 'scrub_brush.n.01', 'scrub_brush.n.01', 'scrub_brush.n.01', 'scrub_brush.n.01', 'scrub_brush.n.01', 'scrub_brush.n.01', 'scrub_brush.n.01', 'server.n.04', 'server.n.04', 'sieve.n.01', 'sifter.n.01', 'skimmer.n.02', 'slicer.n.03', 'spatula.n.01', 'spatula.n.01', 'spatula.n.02', 'sponge.n.01', 'sponge.n.01', 'sponge.n.01', 'sponge.n.01', 'squeegee.n.01', 'squeezer.n.01', 'squeezer.n.01', 'straightener.n.01', 'strainer.n.01', 'tablespoon.n.02', 'tablespoon.n.02', 'tablespoon.n.02', 'tablespoon.n.02', 'tablespoon.n.02', 'tablespoon.n.02', 'tablespoon.n.02', 'tablespoon.n.02', 'tablespoon.n.02', 'tablespoon.n.02', 'tablespoon.n.02', 'tongs.n.01', 'tongs.n.01', 'tongs.n.01', 'tongs.n.01', 'tongs.n.01', 'tongs.n.01', 'tongs.n.01', 'trowel.n.01', 'vase.n.01', 'vase.n.01', 'watering_can.n.01', 'watering_can.n.01', 'whisk.n.01', 'whisk.n.01', 'wooden_spoon.n.02', 'wooden_spoon.n.02']
+        task_list = ['pour', 'scoop', 'cut', 'spray', 'brush', 'handover', 'mix']
+        obj_list = ['saucepan.n.01', 'mug.n.01', 'bottle.n.01', 'cup.n.01', 'bottle.n.01', 'spatula.n.01', 'ladle.n.01', 'knife.n.01', 'hammer.n.01', 'book.n.01', 'tongs.n.01', 'fork.n.01', 'whisk.n.01', 'tablespoon.n.01', 'brush.n.01', 'screwdriver.n.01']
         combox_box = run_combo_box(cands_1=task_list, cands_2=obj_list)
 
         # == graspgpt
@@ -409,8 +420,8 @@ class Sampler(object):
         # self.mask_generator = SamAutomaticMaskGenerator(self.sam)
         self.predictor = SamPredictor(self.sam)
 
-        # == contact-graspnet API
-        self.grasp_interface = ContactGraspAPI()
+        # == anygrasp API
+        self.grasp_interface = AnyGraspAPI()
 
         # == image subscriber
         self.tf_listener = tf.listener.TransformListener()
@@ -539,9 +550,6 @@ class Sampler(object):
                     transform = tra.euler_matrix(0, 0, np.deg2rad(180))
                     best_grasp = np.array(np.matmul(best_grasp, transform))
 
-                # @note topdown
-                # topdown = True
-                topdown = False
                 if topdown:
                     # 投影为 top-down
                     transform = tra.euler_matrix(0, 0, 0)
@@ -631,29 +639,6 @@ class Sampler(object):
 
         pass
 
-    def rgbd_cb(self, rgb_msg, depth_msg):
-        if not self.flag:
-            return
-        self.flag = False
-        rospy.loginfo("Get RGBD Image!")
-        rgb_image = self.bridge.imgmsg_to_cv2(rgb_msg, "bgr8")
-        depth_image = self.bridge.imgmsg_to_cv2(depth_msg, "16UC1")
-        depth_image = depth_image.astype(np.float32) / 1000.0
-
-        rospy.loginfo("Obtaining Pose!")
-        # ee_pose_T = self.get_cur_pose()
-        self.tf_listener.waitForTransform("panda_link0", "panda_hand", rospy.Time(), rospy.Duration(4.0))
-        (trans, quat) = self.tf_listener.lookupTransform("panda_link0", "panda_hand", rospy.Time(0))
-        ee_pose_T = sevenDof2T(list(trans) + list(quat))
-
-        ee_to_camera_pose = np.array([0.0389764, -0.0298156, 0.0737251, 0.00624646, -0.00743901, 0.714763, 0.699299])
-        ee_to_camera_T = sevenDof2T(ee_to_camera_pose)
-        camera_pose_T = np.dot(ee_pose_T, ee_to_camera_T)
-        rospy.loginfo("Obtain Pose!")
-
-        self.test_input(rgb_image, depth_image, self.K, camera_pose_T)
-        pass
-
     def test_input(self, rgb_image, depth_image, K, pcd_T=None):
         # DEBUG = True
         DEBUG = False
@@ -661,7 +646,24 @@ class Sampler(object):
         # == 完整点云进行 Grasp Predict
         full_pcd, object_pcd_color, xy = depth2pc(depth_image, K, rgb=rgb_image, max_depth=0.9)
         # @note predict grasp
-        Ts, grasp_scores, contact_pts = self.grasp_interface.infer(full_pcd)
+        Ts, grasp_scores = self.grasp_interface.infer(full_pcd, object_pcd_color)
+        
+        x_z_T = np.array([
+            0, 0, 1, 0,
+            0, 1, 0, 0,
+            1, 0, 0, 0,
+            0, 0, 0, 1
+        ]).reshape([4, 4])
+        Ts = [np.matmul(T, x_z_T) for T in Ts]
+        rot_T = np.array([
+            0, -1, 0, 0,
+            1, 0, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1
+        ]).reshape([4, 4])
+        Ts = [np.matmul(T, rot_T) for T in Ts]
+                
+        center_pts = np.array([T[:3, 3] for T in Ts])
         if len(Ts) < 10:
             rospy.loginfo("No Grasp!")
             return
@@ -702,13 +704,21 @@ class Sampler(object):
         env_pc, _, _ = depth2pc(depth_image, K, mask=np.bitwise_not(mask), rgb=rgb_image)
         env_pc = filter_point_cloud(env_pc, radius=0.01, min_neighbors=50)
         segment_pc, segment_pc_color, _ = depth2pc(depth_image, K, mask=mask, rgb=rgb_image)
-        filtered_indexes = filter_segment(contact_pts, segment_pc)
+        filtered_indexes = center_filter_segment(center_pts, segment_pc, thres=0.03)
         filtered_Ts = np.array(Ts)[filtered_indexes]
         filtered_grasp_scores = np.array(grasp_scores)[filtered_indexes]
         # filtered_Ts = filtered_Ts[filtered_grasp_scores > 0.2]
         if DEBUG: my_visualize_grasps(segment_pc, filtered_Ts, filtered_grasp_scores)  # debug
 
-        # # debug visualization
+        trans_T = np.array([
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, -0.1,
+            0, 0, 0, 1
+        ]).reshape([4, 4])
+        filtered_Ts = [np.matmul(T, trans_T) for T in filtered_Ts]
+
+        # # @note debug visualization
         # pcd = o3d.geometry.PointCloud()
         # pcd.points = o3d.utility.Vector3dVector(segment_pc)
         # pcd.colors = o3d.utility.Vector3dVector(segment_pc_color / 255.0)
@@ -717,7 +727,7 @@ class Sampler(object):
         #     coord_system = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
         #     coord_system.transform(filtered_Ts[i])
         #     coord_systems.append(coord_system)
-        # vis_coord_systems = coord_systems[:5]
+        # vis_coord_systems = coord_systems
         # o3d.visualization.draw_geometries([*vis_coord_systems, pcd])
 
         # == 转换到 panda_link0 坐标系下
@@ -737,7 +747,7 @@ class Sampler(object):
         #     publish_poses([Ts[0]], self.grasp_pose_pub)
         #     self.pcd_pub.publish(publish_pcd)
         #     rate.sleep()
-        pass
+        # pass
 
     def test_input_2(self):
         object_pcd = np.load("/home/huangdehao/github_projects/graspgpt_ros_ws/src/my_sampler/test_dataset/paint_roller.npy")

@@ -1,0 +1,14 @@
+**/__pycache__/**
+**/*.egg-info/
+*.o
+*.so
+*.egg
+.DS_Store
+.TimeRecord
+license
+license_registration
+grasp_detection/example_data
+grasp_detection/example_data_me
+grasp_tracking/example_data
+grasp_detection/log
+grasp_tracking/log
